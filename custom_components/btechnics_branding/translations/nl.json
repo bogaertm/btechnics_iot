@@ -3,12 +3,21 @@
     "step": {
       "user": {
         "title": "Btechnics IOT",
-        "description": "Installeert de Btechnics IOT huisstijl. Voeg ook toe aan configuration.yaml:\n\nfrontend:\n  extra_module_url:\n    - /btechnics_branding/btechnics-branding.js"
+        "description": "Installeert de Btechnics IOT huisstijl. Na installatie kan je de teksten instellen via het tandwiel bij de integratie."
       }
     },
-    "abort": {
-      "already_configured": "Btechnics IOT is al actief."
-    },
+    "abort": { "already_configured": "Btechnics IOT is al actief." },
     "error": {}
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Btechnics IOT instellingen",
+        "data": {
+          "login_text": "Tekst op het aanmeldscherm",
+          "sidebar_text": "Tekst in de zijbalk"
+        }
+      }
+    }
   }
 }
