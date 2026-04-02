@@ -1,0 +1,12 @@
+{
+  "domain": "btechnics_branding",
+  "name": "Btechnics IOT",
+  "version": "1.0.0",
+  "documentation": "https://btechnics.be",
+  "issue_tracker": "https://github.com/bogaertm/btechnics_iot/issues",
+  "requirements": [],
+  "dependencies": ["frontend"],
+  "codeowners": ["@bogaertm"],
+  "iot_class": "local_push",
+  "config_flow": true
+}
