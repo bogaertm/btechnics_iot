@@ -1,5 +1,5 @@
 /**
- * Btechnics IOT Branding v1.3.0
+ * Btechnics IOT Branding v1.5.0
  */
 const BT = {
   logo: "https://btechnics.be/logo_btechnics/btechnics.svg",
@@ -15,9 +15,9 @@ async function loadConfig() {
     const r = await fetch("/api/btechnics_branding/config");
     if (r.ok) {
       const d = await r.json();
-      BT.loginText   = d.login_text    || BT.loginText;
-      BT.loginSize   = d.login_text_size  || BT.loginSize;
-      BT.sidebarText = d.sidebar_text  || BT.sidebarText;
+      BT.loginText   = d.login_text        || BT.loginText;
+      BT.loginSize   = d.login_text_size   || BT.loginSize;
+      BT.sidebarText = d.sidebar_text      || BT.sidebarText;
       BT.sidebarSize = d.sidebar_text_size || BT.sidebarSize;
     }
   } catch(e) {}
@@ -56,32 +56,46 @@ function patchSidebar() {
   const sr      = sidebar?.shadowRoot;
   if (!sr) return;
 
+  const menu = sr.querySelector(".menu");
+  if (!menu) return;
+  const title = sr.querySelector(".title");
+  if (!title) return;
+
+  // Verwijder alle text nodes uit .title
+  for (const node of [...title.childNodes]) {
+    if (node.nodeType === Node.TEXT_NODE) node.remove();
+  }
+
+  // Voeg logo toe (eenmalig)
   if (!sr.querySelector(".bt-sidebar-logo")) {
     const logo = document.createElement("img");
     logo.className = "bt-sidebar-logo";
     logo.src = BT.logo;
     logo.style.cssText = "height:26px;width:auto;display:block;flex-shrink:0;margin:0 4px 0 8px;";
-    const menu = sr.querySelector(".menu");
-    if (!menu) return;
-    const title = sr.querySelector(".title");
-    if (title) {
-      for (const node of [...title.childNodes])
-        if (node.nodeType === Node.TEXT_NODE) node.textContent = "";
-      const span = title.querySelector("span");
-      if (span) {
-        span.textContent = BT.sidebarText;
-        span.style.fontSize = BT.sidebarSize + "px";
-      } else {
-        title.insertAdjacentText("beforeend", BT.sidebarText);
+    title.insertBefore(logo, title.firstChild);
+  }
+
+  // Maak of update de tekst-span
+  let span = sr.querySelector(".bt-sidebar-text");
+  if (!span) {
+    span = document.createElement("span");
+    span.className = "bt-sidebar-text";
+    title.appendChild(span);
+  }
+  span.textContent = BT.sidebarText;
+  span.style.fontSize = BT.sidebarSize + "px";
+}
+
+function patchLoginText() {
+  // Pas login tekst en grootte aan
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walker.nextNode())) {
+    if (node.textContent.includes("Welkom thuis") || node.textContent.includes("Welkom Thuis")) {
+      node.textContent = node.textContent.replace(/Welkom [Tt]huis!?/g, BT.loginText);
+      if (node.parentElement) {
+        node.parentElement.style.fontSize = BT.loginSize + "px";
       }
-      title.insertBefore(logo, title.firstChild);
-    }
-  } else {
-    // Update tekst en grootte bij wijziging
-    const span = sr.querySelector(".title span");
-    if (span) {
-      if (span.textContent !== BT.sidebarText) span.textContent = BT.sidebarText;
-      span.style.fontSize = BT.sidebarSize + "px";
     }
   }
 }
@@ -91,26 +105,12 @@ function replaceText(root) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   let node;
   while ((node = walker.nextNode())) {
-    if (node.textContent.includes("Home Assistant") || node.textContent.includes("Welkom thuis")) {
-      node.textContent = node.textContent
-        .replace(/Home Assistant/g, BT.sidebarText)
-        .replace(/Welkom [Tt]huis!?/g, BT.loginText);
+    if (node.textContent.includes("Home Assistant")) {
+      node.textContent = node.textContent.replace(/Home Assistant/g, BT.sidebarText);
     }
   }
   for (const el of root.querySelectorAll?.("*") ?? [])
     if (el.shadowRoot) replaceText(el.shadowRoot);
-}
-
-function patchLoginText() {
-  // Pas "Welkom thuis" tekst en grootte aan op de loginpagina
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-  let node;
-  while ((node = walker.nextNode())) {
-    if (node.textContent.includes("Welkom thuis") || node.textContent.includes("Welkom Thuis")) {
-      node.textContent = node.textContent.replace(/Welkom [Tt]huis!?/g, BT.loginText);
-      if (node.parentElement) node.parentElement.style.fontSize = BT.loginSize + "px";
-    }
-  }
 }
 
 function patchTitle() {
