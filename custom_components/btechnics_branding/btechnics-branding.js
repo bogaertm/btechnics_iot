@@ -1,12 +1,26 @@
 /**
- * Btechnics IOT Branding v1.6.0
- * Geladen via configuration.yaml extra_module_url
+ * Btechnics IOT Branding v1.1.0
+ * Teksten instelbaar via Instellingen → Integraties → Btechnics IOT → Tandwiel
  */
+
 const BT = {
-  name: "Btechnics IOT",
   logo: "https://btechnics.be/logo_btechnics/btechnics.svg",
   icon: "https://btechnics.be/logo_btechnics/btechnics-icon.png",
+  loginText: "Btechnics IOT",
+  sidebarText: "Btechnics IOT",
 };
+
+/* Haal de instellingen op van de HA API */
+async function loadConfig() {
+  try {
+    const r = await fetch("/api/btechnics_branding/config");
+    if (r.ok) {
+      const data = await r.json();
+      BT.loginText   = data.login_text   || BT.loginText;
+      BT.sidebarText = data.sidebar_text || BT.sidebarText;
+    }
+  } catch (e) {}
+}
 
 /* 1. Globale CSS */
 const style = document.createElement("style");
@@ -29,10 +43,20 @@ function patchLaunchScreen() {
   else screen.prepend(img);
 }
 
-/* 3. Login logo - vervangt favicon-192x192.png */
+/* 3. Login logo + tekst */
 function patchLoginLogo() {
+  // Vervang HA favicon door Btechnics icoon
   document.querySelectorAll('img[src*="favicon-192x192"], img[src*="favicon-512x512"]')
     .forEach(img => { if (!img.dataset.bt) { img.src = BT.icon; img.dataset.bt = "1"; } });
+
+  // Vervang "Welkom thuis!" door de ingestelde login tekst
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
+  let node;
+  while ((node = walker.nextNode())) {
+    if (node.textContent.includes("Welkom thuis") || node.textContent.includes("Welkom Thuis")) {
+      node.textContent = node.textContent.replace(/Welkom [Tt]huis!?/g, BT.loginText);
+    }
+  }
 }
 
 /* 4. Sidebar */
@@ -43,23 +67,32 @@ function patchSidebar() {
   if (!mainSR) return;
   const sidebar = mainSR.querySelector("ha-drawer")?.querySelector("ha-sidebar");
   const sr      = sidebar?.shadowRoot;
-  if (!sr || sr.querySelector(".bt-sidebar-logo")) return;
+  if (!sr) return;
 
-  const logo = document.createElement("img");
-  logo.className = "bt-sidebar-logo";
-  logo.src = BT.logo;
-  logo.style.cssText = "height:26px;width:auto;display:block;flex-shrink:0;margin:0 4px 0 8px;";
-
-  const menu = sr.querySelector(".menu");
-  if (!menu) return;
-  const title = sr.querySelector(".title");
-  if (title) {
-    for (const node of [...title.childNodes])
-      if (node.nodeType === Node.TEXT_NODE) node.textContent = "";
-    const span = title.querySelector("span");
-    if (span) span.textContent = BT.name;
-    else title.insertAdjacentText("beforeend", BT.name);
-    title.insertBefore(logo, title.firstChild);
+  // Logo toevoegen (eenmalig)
+  if (!sr.querySelector(".bt-sidebar-logo")) {
+    const logo = document.createElement("img");
+    logo.className = "bt-sidebar-logo";
+    logo.src = BT.logo;
+    logo.style.cssText = "height:26px;width:auto;display:block;flex-shrink:0;margin:0 4px 0 8px;";
+    const menu = sr.querySelector(".menu");
+    if (!menu) return;
+    const title = sr.querySelector(".title");
+    if (title) {
+      for (const node of [...title.childNodes])
+        if (node.nodeType === Node.TEXT_NODE) node.textContent = "";
+      const span = title.querySelector("span");
+      if (span) span.textContent = BT.sidebarText;
+      else title.insertAdjacentText("beforeend", BT.sidebarText);
+      title.insertBefore(logo, title.firstChild);
+    }
+  } else {
+    // Tekst updaten als instellingen gewijzigd zijn
+    const title = sr.querySelector(".title");
+    if (title) {
+      const span = title.querySelector("span");
+      if (span && span.textContent !== BT.sidebarText) span.textContent = BT.sidebarText;
+    }
   }
 }
 
@@ -69,11 +102,8 @@ function replaceText(root) {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   let node;
   while ((node = walker.nextNode())) {
-    if (node.textContent.includes("Home Assistant") || node.textContent.includes("Welkom thuis")) {
-      node.textContent = node.textContent
-        .replace(/Home Assistant/g, BT.name)
-        .replace(/Welkom thuis!/gi, BT.name)
-        .replace(/Welkom Thuis!/gi, BT.name);
+    if (node.textContent.includes("Home Assistant")) {
+      node.textContent = node.textContent.replace(/Home Assistant/g, BT.sidebarText);
     }
   }
   for (const el of root.querySelectorAll?.("*") ?? [])
@@ -82,8 +112,8 @@ function replaceText(root) {
 
 /* 6. Titel en favicon */
 function patchTitle() {
-  if (document.title.includes("Home Assistant") || document.title.includes("Welkom thuis"))
-    document.title = document.title.replace(/Home Assistant|Welkom thuis/gi, BT.name);
+  if (document.title.includes("Home Assistant"))
+    document.title = document.title.replace(/Home Assistant/g, BT.sidebarText);
 }
 function patchFavicon() {
   document.querySelectorAll('link[rel*="icon"]').forEach(l => l.remove());
@@ -101,14 +131,18 @@ function patchAll() {
   replaceText(document.body);
 }
 
-patchLaunchScreen();
-patchTitle();
-patchFavicon();
+/* 8. Start: eerst config laden, dan patchen */
+(async () => {
+  await loadConfig();
+  patchLaunchScreen();
+  patchTitle();
+  patchFavicon();
 
-new MutationObserver(patchAll)
-  .observe(document.documentElement, { childList: true, subtree: true });
+  new MutationObserver(patchAll)
+    .observe(document.documentElement, { childList: true, subtree: true });
 
-window.addEventListener("load", () => {
-  patchAll();
-  setInterval(patchAll, 3000);
-});
+  window.addEventListener("load", () => {
+    patchAll();
+    setInterval(patchAll, 3000);
+  });
+})();
