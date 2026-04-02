@@ -27,16 +27,12 @@ class BtechnicsBrandingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     @staticmethod
     @callback
     def async_get_options_flow(config_entry):
-        """Opties configureren."""
-        return BtechnicsBrandingOptionsFlow(config_entry)
+        """Opties flow aanmaken."""
+        return BtechnicsBrandingOptionsFlow()
 
 
 class BtechnicsBrandingOptionsFlow(config_entries.OptionsFlow):
-    """Opties flow voor Btechnics IOT."""
-
-    def __init__(self, config_entry):
-        """Init."""
-        self.config_entry = config_entry
+    """Opties flow voor teksten instellen."""
 
     async def async_step_init(self, user_input=None):
         """Toon instellingen."""
