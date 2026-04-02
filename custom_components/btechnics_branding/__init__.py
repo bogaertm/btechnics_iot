@@ -14,7 +14,6 @@ _JS_FILE = str(_DIR / "btechnics-branding.js")
 _JS_URL = "/btechnics_branding/btechnics-branding.js"
 _API_URL = "/api/btechnics_branding/config"
 
-# CSS die server-side wordt geinjecteerd - verbergt SVG en OHF badge voor eerste render
 _HIDE_CSS = (
     "<style id='bt-hide'>"
     "#ha-launch-screen svg{display:none!important}"
@@ -57,37 +56,38 @@ def _patch_app_handle(app: web.Application) -> None:
         if "text/html" not in ct:
             return response
         try:
-            body = response.body
-            if isinstance(body, bytes):
-                text = body.decode("utf-8", errors="replace")
-            else:
-                return response
-            # Injecteer CSS direct na <head> tag
-            if "<head>" in text and "bt-hide" not in text:
+            # Probeer tekst via meerdere aiohttp properties
+            text = None
+            if hasattr(response, "_text") and response._text is not None:
+                text = response._text
+            elif hasattr(response, "_body") and response._body is not None:
+                charset = getattr(response, "charset", "utf-8") or "utf-8"
+                text = response._body.decode(charset, errors="replace")
+            elif hasattr(response, "body") and response.body is not None:
+                charset = getattr(response, "charset", "utf-8") or "utf-8"
+                text = response.body.decode(charset, errors="replace")
+
+            if text and "<head>" in text and "bt-hide" not in text:
                 patched = text.replace("<head>", "<head>" + _HIDE_CSS, 1)
-                headers = dict(response.headers)
-                headers.pop("Content-Length", None)
-                headers.pop("content-length", None)
-                headers.pop("Content-Security-Policy", None)
-                headers.pop("content-security-policy", None)
+                _LOGGER.info("Btechnics IOT: CSS geinjecteerd in HTML response")
                 return web.Response(
                     text=patched,
                     status=response.status,
                     content_type="text/html",
                     charset="utf-8",
-                    headers=headers,
                 )
+            elif text is None:
+                _LOGGER.warning("Btechnics IOT: HTML response body is None, type=%s", type(response).__name__)
         except Exception as err:
-            _LOGGER.debug("CSS injectie fout: %s", err)
+            _LOGGER.warning("Btechnics IOT CSS injectie fout: %s", err)
         return response
 
     app._handle = _patched_handle
     app._bt_css_patched = True
-    _LOGGER.info("Btechnics IOT: CSS injectie actief")
+    _LOGGER.info("Btechnics IOT: _handle wrapper actief")
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
-    """Setup: statisch pad, API view, JS en CSS injectie."""
     try:
         await hass.http.async_register_static_paths([
             StaticPathConfig(_JS_URL, _JS_FILE, cache_headers=False)
@@ -99,15 +99,13 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
     try:
         frontend.add_extra_js_url(hass, _JS_URL)
-        _LOGGER.info("Btechnics IOT: JS module geladen")
     except Exception as err:
         _LOGGER.error("add_extra_js_url: %s", err)
 
-    # Patch de request handler voor CSS injectie
     try:
         _patch_app_handle(hass.http.app)
     except Exception as err:
-        _LOGGER.error("CSS patch fout: %s", err)
+        _LOGGER.error("_handle patch fout: %s", err)
 
     return True
 
