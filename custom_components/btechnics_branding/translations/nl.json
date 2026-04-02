@@ -3,7 +3,7 @@
     "step": {
       "user": {
         "title": "Btechnics IOT",
-        "description": "Installeert de Btechnics IOT huisstijl. Na installatie kan je de teksten instellen via het tandwiel bij de integratie."
+        "description": "Installeert de Btechnics IOT huisstijl. Na installatie stel je de teksten in via het tandwiel."
       }
     },
     "abort": { "already_configured": "Btechnics IOT is al actief." },
@@ -15,7 +15,9 @@
         "title": "Btechnics IOT instellingen",
         "data": {
           "login_text": "Tekst op het aanmeldscherm",
-          "sidebar_text": "Tekst in de zijbalk"
+          "login_text_size": "Tekstgrootte aanmeldscherm (px)",
+          "sidebar_text": "Tekst in de zijbalk",
+          "sidebar_text_size": "Tekstgrootte zijbalk (px)"
         }
       }
     }
