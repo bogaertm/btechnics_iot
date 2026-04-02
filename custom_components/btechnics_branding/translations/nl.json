@@ -1,0 +1,14 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Btechnics IOT",
+        "description": "Installeert de Btechnics IOT huisstijl. Voeg ook toe aan configuration.yaml:\n\nfrontend:\n  extra_module_url:\n    - /btechnics_branding/btechnics-branding.js"
+      }
+    },
+    "abort": {
+      "already_configured": "Btechnics IOT is al actief."
+    },
+    "error": {}
+  }
+}
