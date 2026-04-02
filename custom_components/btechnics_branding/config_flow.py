@@ -1,8 +1,11 @@
 """Config flow voor Btechnics IOT."""
 import voluptuous as vol
 from homeassistant import config_entries
+from homeassistant.core import callback
 
 DOMAIN = "btechnics_branding"
+DEFAULT_LOGIN_TEXT = "Btechnics IOT"
+DEFAULT_SIDEBAR_TEXT = "Btechnics IOT"
 
 
 class BtechnicsBrandingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -11,7 +14,7 @@ class BtechnicsBrandingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
     VERSION = 1
 
     async def async_step_user(self, user_input=None):
-        """Stap 1."""
+        """Stap 1: installeren."""
         if self._async_current_entries():
             return self.async_abort(reason="already_configured")
         if user_input is not None:
@@ -19,4 +22,38 @@ class BtechnicsBrandingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
         return self.async_show_form(
             step_id="user",
             data_schema=vol.Schema({}),
+        )
+
+    @staticmethod
+    @callback
+    def async_get_options_flow(config_entry):
+        """Opties configureren."""
+        return BtechnicsBrandingOptionsFlow(config_entry)
+
+
+class BtechnicsBrandingOptionsFlow(config_entries.OptionsFlow):
+    """Opties flow voor Btechnics IOT."""
+
+    def __init__(self, config_entry):
+        """Init."""
+        self.config_entry = config_entry
+
+    async def async_step_init(self, user_input=None):
+        """Toon instellingen."""
+        if user_input is not None:
+            return self.async_create_entry(title="", data=user_input)
+
+        current = self.config_entry.options
+        return self.async_show_form(
+            step_id="init",
+            data_schema=vol.Schema({
+                vol.Optional(
+                    "login_text",
+                    default=current.get("login_text", DEFAULT_LOGIN_TEXT),
+                ): str,
+                vol.Optional(
+                    "sidebar_text",
+                    default=current.get("sidebar_text", DEFAULT_SIDEBAR_TEXT),
+                ): str,
+            }),
         )
