@@ -1,4 +1,5 @@
 """Btechnics IOT Branding."""
+import asyncio
 import json
 import logging
 import pathlib
@@ -22,7 +23,6 @@ _HIDE_CSS = (
     "</style>"
 )
 
-# Routes die we NOOIT patchen (geen HTML)
 _SKIP_PREFIXES = (
     '/api/', '/auth/', '/static/', '/frontend_latest/', '/frontend_es5/',
     '/local/', '/hacsfiles/', '/_debugger', '/service_worker',
@@ -96,7 +96,6 @@ def _make_manifest_handler(original):
                 m["short_name"] = "Btechnics IOT"
                 for icon in m.get("icons", []):
                     icon["src"] = "https://btechnics.be/logo_btechnics/btechnics-icon.png"
-                _LOGGER.warning("BT: manifest gepatcht")
                 return web.Response(
                     text=json.dumps(m), status=200,
                     content_type="application/manifest+json",
@@ -109,14 +108,17 @@ def _make_manifest_handler(original):
 
 def _patch_routes(app: web.Application) -> None:
     patched = []
-    skipped = []
+    html_routes = []
 
     for resource in app.router.resources():
         canonical = getattr(resource, 'canonical', '') or ''
+        res_type = type(resource).__name__
 
-        # Skip bekende niet-HTML prefixes
+        # Verzamel HTML-kandidaten voor diagnose
+        if not any(canonical.startswith(p) for p in _SKIP_PREFIXES):
+            html_routes.append(f"{res_type}:{canonical}")
+
         if any(canonical.startswith(p) for p in _SKIP_PREFIXES):
-            skipped.append(canonical)
             continue
 
         for route in resource:
@@ -127,13 +129,13 @@ def _patch_routes(app: web.Application) -> None:
                     route._handler = _make_manifest_handler(route._handler)
                     patched.append(f"MANIFEST:{canonical}")
                 else:
-                    # Alle andere routes: HTML handler (checkt intern op content-type)
                     route._handler = _make_html_handler(route._handler)
                     patched.append(f"HTML:{canonical}")
             except Exception as e:
                 _LOGGER.warning("BT patch fout %s: %s", canonical, e)
 
-    _LOGGER.warning("BT: gepatcht (%d): %s", len(patched), patched)
+    _LOGGER.warning("BT: HTML-kandidaten (%d): %s", len(html_routes), html_routes[:20])
+    _LOGGER.warning("BT: gepatcht (%d): %s", len(patched), patched[:20])
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -142,21 +144,37 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
     _LOGGER.warning("BT: setup_entry start")
+
     try:
         await hass.http.async_register_static_paths([
             StaticPathConfig(_JS_URL, _JS_FILE, cache_headers=False)
         ])
     except Exception as err:
         _LOGGER.warning("Static path: %s", err)
+
     hass.http.register_view(BtechnicsBrandingConfigView(hass))
+
     try:
         frontend.add_extra_js_url(hass, _JS_URL)
     except Exception as err:
         _LOGGER.warning("add_extra_js_url: %s", err)
+
+    # Patch onmiddellijk
     try:
         _patch_routes(hass.http.app)
     except Exception as err:
-        _LOGGER.warning("route patch fout: %s", err)
+        _LOGGER.warning("route patch fout (direct): %s", err)
+
+    # Patch ook uitgesteld - na volledige HA startup
+    async def _delayed_patch(_now=None):
+        _LOGGER.warning("BT: uitgestelde patch start")
+        try:
+            _patch_routes(hass.http.app)
+        except Exception as err:
+            _LOGGER.warning("route patch fout (uitgesteld): %s", err)
+
+    hass.bus.async_listen_once("homeassistant_started", _delayed_patch)
+
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
     _LOGGER.warning("BT: setup_entry volledig")
     return True
