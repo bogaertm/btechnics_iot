@@ -22,6 +22,13 @@ _HIDE_CSS = (
     "</style>"
 )
 
+# Routes die we NOOIT patchen (geen HTML)
+_SKIP_PREFIXES = (
+    '/api/', '/auth/', '/static/', '/frontend_latest/', '/frontend_es5/',
+    '/local/', '/hacsfiles/', '/_debugger', '/service_worker',
+    '/btechnics_branding/',
+)
+
 
 class BtechnicsBrandingConfigView(HomeAssistantView):
     url = _API_URL
@@ -60,13 +67,13 @@ def _make_html_handler(original):
                 text = response._body.decode("utf-8", errors="replace")
             if text and "<head>" in text and "bt-hide" not in text:
                 patched = text.replace("<head>", "<head>" + _HIDE_CSS, 1)
-                _LOGGER.warning("BT: CSS geinjecteerd (path=%s)", request.path)
+                _LOGGER.warning("BT: CSS geinjecteerd voor %s", request.path)
                 return web.Response(
                     text=patched, status=response.status,
                     content_type="text/html", charset="utf-8",
                 )
             else:
-                _LOGGER.warning("BT: HTML niet gepatcht - ct=%s text=%s path=%s",
+                _LOGGER.warning("BT: HTML niet gepatcht ct=%s text=%s path=%s",
                     ct, text is not None, request.path)
         except Exception as err:
             _LOGGER.warning("BT HTML fout: %s", err)
@@ -102,38 +109,31 @@ def _make_manifest_handler(original):
 
 def _patch_routes(app: web.Application) -> None:
     patched = []
-    all_routes = []
+    skipped = []
 
     for resource in app.router.resources():
         canonical = getattr(resource, 'canonical', '') or ''
-        pattern = str(getattr(getattr(resource, '_pattern', None), 'pattern', '') or '')
-        res_type = type(resource).__name__
-        all_routes.append(f"{res_type}:{canonical}:{pattern[:30]}")
+
+        # Skip bekende niet-HTML prefixes
+        if any(canonical.startswith(p) for p in _SKIP_PREFIXES):
+            skipped.append(canonical)
+            continue
 
         for route in resource:
             if route.method not in ('GET', '*', 'HEAD'):
                 continue
             try:
-                # Manifest
                 if canonical == '/manifest.json':
                     route._handler = _make_manifest_handler(route._handler)
-                    patched.append('/manifest.json')
-
-                # HTML catch-all: zoek op bekende HA frontend patterns
-                elif (
-                    canonical in ('/', '') or
-                    '{path' in canonical or
-                    '.*' in pattern or
-                    canonical == '/{path:.*}'
-                ):
+                    patched.append(f"MANIFEST:{canonical}")
+                else:
+                    # Alle andere routes: HTML handler (checkt intern op content-type)
                     route._handler = _make_html_handler(route._handler)
                     patched.append(f"HTML:{canonical}")
             except Exception as e:
-                _LOGGER.warning("BT patch fout voor %s: %s", canonical, e)
+                _LOGGER.warning("BT patch fout %s: %s", canonical, e)
 
-    # Log alle routes voor diagnose
-    _LOGGER.warning("BT: ALLE routes (%d): %s", len(all_routes), str(all_routes[:40]))
-    _LOGGER.warning("BT: gepatcht: %s", patched)
+    _LOGGER.warning("BT: gepatcht (%d): %s", len(patched), patched)
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
