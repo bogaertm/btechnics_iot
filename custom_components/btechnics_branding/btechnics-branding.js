@@ -1,7 +1,7 @@
 /**
- * Btechnics IOT Branding v1.6.0
+ * Btechnics IOT Branding v1.7.0
  */
-const BRAND = "Btechnics IOT"; // Vaste merknaam - vervangt "Home Assistant" overal
+const BRAND = "Btechnics IOT";
 
 const BT = {
   logo: "https://btechnics.be/logo_btechnics/btechnics.svg",
@@ -32,6 +32,34 @@ style.textContent = `
 `;
 document.head.appendChild(style);
 
+function deepQuery(root, selector) {
+  const found = [];
+  try {
+    found.push(...root.querySelectorAll(selector));
+    for (const el of root.querySelectorAll('*')) {
+      if (el.shadowRoot) found.push(...deepQuery(el.shadowRoot, selector));
+    }
+  } catch(e) {}
+  return found;
+}
+
+function deepReplaceText(root, from, to) {
+  try {
+    const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(escaped, 'g');
+    const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+    let node;
+    while ((node = walker.nextNode())) {
+      if (node.textContent.includes(from)) {
+        node.textContent = node.textContent.replace(re, to);
+      }
+    }
+    for (const el of root.querySelectorAll('*')) {
+      if (el.shadowRoot) deepReplaceText(el.shadowRoot, from, to);
+    }
+  } catch(e) {}
+}
+
 function patchLaunchScreen() {
   const screen = document.getElementById("ha-launch-screen");
   if (!screen || screen.querySelector(".bt-logo")) return;
@@ -44,9 +72,28 @@ function patchLaunchScreen() {
   else screen.prepend(img);
 }
 
-function patchLoginLogo() {
-  document.querySelectorAll('img[src*="favicon-192x192"], img[src*="favicon-512x512"]')
+function patchLoginPage() {
+  deepQuery(document, 'img[src*="favicon-192x192"], img[src*="favicon-512x512"], img[src*="favicon-384x384"]')
     .forEach(img => { if (!img.dataset.bt) { img.src = BT.icon; img.dataset.bt = "1"; } });
+
+  const haAuthEls = deepQuery(document, 'ha-authorize, ha-auth-flow, ha-auth');
+  haAuthEls.forEach(haAuth => {
+    if (haAuth.shadowRoot) {
+      haAuth.shadowRoot.querySelectorAll('img').forEach(img => {
+        if (!img.dataset.bt) {
+          img.src = BT.icon;
+          img.style.height = "64px";
+          img.style.width = "auto";
+          img.dataset.bt = "1";
+        }
+      });
+    }
+  });
+
+  deepReplaceText(document.body, "Welkom thuis!", BT.loginText);
+  deepReplaceText(document.body, "Welkom thuis", BT.loginText);
+  deepReplaceText(document.body, "Welcome home!", BT.loginText);
+  deepReplaceText(document.body, "Welcome home", BT.loginText);
 }
 
 function patchSidebar() {
@@ -61,11 +108,9 @@ function patchSidebar() {
   const title = sr.querySelector(".title");
   if (!title) return;
 
-  // Verwijder alle tekst nodes
   for (const node of [...title.childNodes])
     if (node.nodeType === Node.TEXT_NODE) node.remove();
 
-  // Logo (eenmalig)
   if (!sr.querySelector(".bt-sidebar-logo")) {
     const logo = document.createElement("img");
     logo.className = "bt-sidebar-logo";
@@ -74,7 +119,6 @@ function patchSidebar() {
     title.insertBefore(logo, title.firstChild);
   }
 
-  // Tekst-span met instelbare tekst en grootte
   let span = sr.querySelector(".bt-sidebar-text");
   if (!span) {
     span = document.createElement("span");
@@ -83,31 +127,6 @@ function patchSidebar() {
   }
   span.textContent = BT.sidebarText;
   span.style.fontSize = BT.sidebarSize + "px";
-}
-
-function patchLoginText() {
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
-  let node;
-  while ((node = walker.nextNode())) {
-    if (node.textContent.includes("Welkom thuis") || node.textContent.includes("Welkom Thuis")) {
-      node.textContent = node.textContent.replace(/Welkom [Tt]huis!?/g, BT.loginText);
-      if (node.parentElement) node.parentElement.style.fontSize = BT.loginSize + "px";
-    }
-  }
-}
-
-function replaceText(root) {
-  // "Home Assistant" wordt altijd vervangen door de vaste merknaam BRAND
-  if (!root) return;
-  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
-  let node;
-  while ((node = walker.nextNode())) {
-    if (node.nodeType === Node.TEXT_NODE && node.textContent.includes("Home Assistant")) {
-      node.textContent = node.textContent.replace(/Home Assistant/g, BRAND);
-    }
-  }
-  for (const el of root.querySelectorAll?.("*") ?? [])
-    if (el.shadowRoot) replaceText(el.shadowRoot);
 }
 
 function patchTitle() {
@@ -124,11 +143,10 @@ function patchFavicon() {
 
 function patchAll() {
   patchLaunchScreen();
-  patchLoginLogo();
-  patchLoginText();
+  patchLoginPage();
   patchSidebar();
   patchTitle();
-  replaceText(document.body);
+  deepReplaceText(document.body, "Home Assistant", BRAND);
 }
 
 (async () => {
@@ -140,6 +158,6 @@ function patchAll() {
     .observe(document.documentElement, { childList: true, subtree: true });
   window.addEventListener("load", () => {
     patchAll();
-    setInterval(patchAll, 3000);
+    setInterval(patchAll, 2000);
   });
 })();
