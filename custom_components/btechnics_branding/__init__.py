@@ -44,85 +44,80 @@ class BtechnicsBrandingConfigView(HomeAssistantView):
         })
 
 
-def _patch_app_handle(app: web.Application) -> None:
-    if getattr(app, "_bt_css_patched", False):
-        return
+def _patch_routes(app: web.Application) -> None:
+    """Patch specifieke route handlers rechtstreeks in de router."""
+    patched = []
 
-    original_handle = app._handle
+    for resource in app.router.resources():
+        canonical = getattr(resource, 'canonical', '') or ''
+        pattern = str(getattr(resource, '_pattern', '') or '')
 
-    async def _patched_handle(request: web.Request) -> web.StreamResponse:
-        response = await original_handle(request)
-        path = request.path
+        for route in resource:
+            if route.method not in ('GET', '*', 'HEAD'):
+                continue
 
-        # Log elke HTML of manifest request
-        ct = getattr(response, "content_type", "") or ""
-        resp_type = type(response).__name__
+            original = route._handler
 
-        if path in ("/", "/manifest.json") or "text/html" in ct:
-            _LOGGER.warning(
-                "BT intercept: path=%s ct='%s' type=%s body=%s text=%s fpath=%s",
-                path, ct, resp_type,
-                hasattr(response, "_body") and response._body is not None,
-                hasattr(response, "_text") and response._text is not None,
-                getattr(response, "_path", None),
-            )
+            # --- Patch /manifest.json ---
+            if canonical == '/manifest.json':
+                async def manifest_handler(request, _orig=original):
+                    response = await _orig(request)
+                    try:
+                        raw = None
+                        if hasattr(response, "_body") and response._body:
+                            raw = response._body
+                        elif hasattr(response, "body") and response.body:
+                            raw = response.body
+                        if raw:
+                            m = json.loads(raw.decode("utf-8"))
+                            m["name"] = "Btechnics IOT"
+                            m["short_name"] = "Btechnics IOT"
+                            for icon in m.get("icons", []):
+                                icon["src"] = "https://btechnics.be/logo_btechnics/btechnics-icon.png"
+                            _LOGGER.warning("BT: manifest gepatcht via route")
+                            return web.Response(
+                                text=json.dumps(m), status=200,
+                                content_type="application/manifest+json",
+                            )
+                    except Exception as err:
+                        _LOGGER.warning("BT manifest route fout: %s", err)
+                    return response
 
-        # --- PWA manifest patchen ---
-        if path == "/manifest.json":
-            try:
-                raw = None
-                if hasattr(response, "_body") and response._body:
-                    raw = response._body
-                elif hasattr(response, "body") and response.body:
-                    raw = response.body
-                elif hasattr(response, "_path") and response._path:
-                    raw = pathlib.Path(str(response._path)).read_bytes()
-                if raw:
-                    manifest = json.loads(raw.decode("utf-8"))
-                    manifest["name"] = "Btechnics IOT"
-                    manifest["short_name"] = "Btechnics IOT"
-                    for icon in manifest.get("icons", []):
-                        icon["src"] = "https://btechnics.be/logo_btechnics/btechnics-icon.png"
-                    _LOGGER.warning("BT: manifest gepatcht")
-                    return web.Response(
-                        text=json.dumps(manifest), status=200,
-                        content_type="application/manifest+json",
-                    )
-            except Exception as err:
-                _LOGGER.warning("BT manifest fout: %s", err)
+                route._handler = manifest_handler
+                patched.append('/manifest.json')
 
-        # --- CSS injecteren in HTML ---
-        if "text/html" not in ct:
-            return response
-        try:
-            text = None
-            if hasattr(response, "_path") and response._path:
-                text = pathlib.Path(str(response._path)).read_text(encoding="utf-8")
-                _LOGGER.warning("BT: FileResponse gelezen van %s", response._path)
-            if text is None and hasattr(response, "_text") and response._text:
-                text = response._text
-            if text is None and hasattr(response, "_body") and response._body:
-                text = response._body.decode(getattr(response, "charset", "utf-8") or "utf-8", errors="replace")
-            if text is None and hasattr(response, "body") and response.body:
-                text = response.body.decode(getattr(response, "charset", "utf-8") or "utf-8", errors="replace")
+            # --- Patch HTML routes (SPA catch-all) ---
+            elif '.*' in pattern or '{path' in canonical:
+                async def html_handler(request, _orig=original):
+                    response = await _orig(request)
+                    ct = getattr(response, "content_type", "") or ""
+                    if "text/html" not in ct:
+                        return response
+                    try:
+                        text = None
+                        if hasattr(response, "_path") and response._path:
+                            text = pathlib.Path(str(response._path)).read_text("utf-8")
+                        if text is None and hasattr(response, "_text") and response._text:
+                            text = response._text
+                        if text is None and hasattr(response, "_body") and response._body:
+                            text = response._body.decode("utf-8", errors="replace")
+                        if text and "<head>" in text and "bt-hide" not in text:
+                            patched_text = text.replace("<head>", "<head>" + _HIDE_CSS, 1)
+                            _LOGGER.warning("BT: CSS geinjecteerd via route (path=%s)", request.path)
+                            return web.Response(
+                                text=patched_text, status=response.status,
+                                content_type="text/html", charset="utf-8",
+                            )
+                        else:
+                            _LOGGER.warning("BT: HTML geen patch - ct=%s text=%s", ct, text is not None)
+                    except Exception as err:
+                        _LOGGER.warning("BT HTML route fout: %s", err)
+                    return response
 
-            if text and "<head>" in text and "bt-hide" not in text:
-                patched = text.replace("<head>", "<head>" + _HIDE_CSS, 1)
-                _LOGGER.warning("BT: CSS geinjecteerd (type=%s)", resp_type)
-                return web.Response(
-                    text=patched, status=response.status,
-                    content_type="text/html", charset="utf-8",
-                )
-            else:
-                _LOGGER.warning("BT: CSS niet geinjecteerd - text=%s, head=%s",
-                    text is not None, text and "<head>" in text if text else False)
-        except Exception as err:
-            _LOGGER.warning("BT CSS fout: %s", err)
-        return response
+                route._handler = html_handler
+                patched.append(canonical or pattern)
 
-    app._handle = _patched_handle
-    app._bt_css_patched = True
-    _LOGGER.warning("BT: _handle wrapper ACTIEF")
+    _LOGGER.warning("BT: routes gepatcht: %s", patched)
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -137,15 +132,19 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
         ])
     except Exception as err:
         _LOGGER.warning("Static path: %s", err)
+
     hass.http.register_view(BtechnicsBrandingConfigView(hass))
+
     try:
         frontend.add_extra_js_url(hass, _JS_URL)
     except Exception as err:
         _LOGGER.warning("add_extra_js_url: %s", err)
+
     try:
-        _patch_app_handle(hass.http.app)
+        _patch_routes(hass.http.app)
     except Exception as err:
-        _LOGGER.warning("_handle patch fout: %s", err)
+        _LOGGER.warning("route patch fout: %s", err)
+
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
     _LOGGER.warning("BT: setup_entry volledig")
     return True
