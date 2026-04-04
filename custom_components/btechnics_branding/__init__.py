@@ -27,59 +27,6 @@ _AUTH_JS = """<script>
 </script>"""
 
 
-async def _bt_middleware(request: web.Request, handler) -> web.StreamResponse:
-    """Middleware: injecteer CSS/JS in ALLE HTML responses."""
-    response = await handler(request)
-    path = request.path
-    ct = getattr(response, "content_type", "") or ""
-
-    # Manifest patchen
-    if path == "/manifest.json":
-        try:
-            raw = None
-            if hasattr(response, "_body") and response._body:
-                raw = response._body
-            elif hasattr(response, "body") and response.body:
-                raw = response.body
-            if raw:
-                m = json.loads(raw.decode("utf-8"))
-                m["name"] = "Btechnics IOT"
-                m["short_name"] = "Btechnics IOT"
-                for icon in m.get("icons", []):
-                    icon["src"] = "https://btechnics.be/logo_btechnics/btechnics-icon.png"
-                return web.Response(
-                    text=json.dumps(m), status=200,
-                    content_type="application/manifest+json",
-                )
-        except Exception as err:
-            _LOGGER.debug("BT manifest: %s", err)
-        return response
-
-    # HTML patchen
-    if "text/html" not in ct:
-        return response
-    try:
-        text = None
-        if hasattr(response, "_path") and response._path:
-            text = pathlib.Path(str(response._path)).read_text("utf-8")
-        if text is None and hasattr(response, "_text") and response._text:
-            text = response._text
-        if text is None and hasattr(response, "_body") and response._body:
-            text = response._body.decode("utf-8", errors="replace")
-        if text and "<head>" in text and "bt-hide" not in text:
-            is_auth = "authorize" in path or "/auth/" in path
-            inject = _HIDE_CSS + (_AUTH_JS if is_auth else "")
-            patched = text.replace("<head>", "<head>" + inject, 1)
-            _LOGGER.warning("BT middleware: HTML gepatcht voor %s", path)
-            return web.Response(
-                text=patched, status=response.status,
-                content_type="text/html", charset="utf-8",
-            )
-    except Exception as err:
-        _LOGGER.debug("BT middleware HTML: %s", err)
-    return response
-
-
 class BtechnicsBrandingConfigView(HomeAssistantView):
     url = _API_URL
     name = "api:btechnics_branding:config"
@@ -101,18 +48,108 @@ class BtechnicsBrandingConfigView(HomeAssistantView):
         })
 
 
-def _install_middleware(app: web.Application) -> None:
-    """Voeg middleware toe aan aiohttp app."""
-    if getattr(app, "_bt_mw_installed", False):
-        return
-    try:
-        # aiohttp middlewares zijn een tuple - we vervangen ze
-        existing = list(app._middlewares)
-        app._middlewares = tuple([web.middleware(_bt_middleware)] + existing)
-        app._bt_mw_installed = True
-        _LOGGER.warning("BT: middleware geinstalleerd")
-    except Exception as err:
-        _LOGGER.warning("BT middleware install fout: %s", err)
+def _inject_html(text, is_auth=False):
+    """Injecteer CSS/JS in HTML tekst."""
+    if "<head>" not in text or "bt-hide" in text:
+        return None
+    inject = _HIDE_CSS + (_AUTH_JS if is_auth else "")
+    return text.replace("<head>", "<head>" + inject, 1)
+
+
+def _read_response_text(response):
+    """Lees tekst uit aiohttp response, alle mogelijke types."""
+    # FileResponse: lees van disk
+    if hasattr(response, "_path") and response._path:
+        try:
+            return pathlib.Path(str(response._path)).read_text("utf-8")
+        except Exception:
+            pass
+    # Response met tekst
+    if hasattr(response, "_text") and response._text:
+        return response._text
+    # Response met bytes
+    for attr in ("_body", "body"):
+        raw = getattr(response, attr, None)
+        if raw:
+            charset = getattr(response, "charset", "utf-8") or "utf-8"
+            try:
+                return raw.decode(charset, errors="replace")
+            except Exception:
+                pass
+    return None
+
+
+def _make_handler(original, is_auth=False):
+    async def handler(request):
+        response = await original(request)
+        ct = getattr(response, "content_type", "") or ""
+        if "text/html" not in ct:
+            return response
+        text = _read_response_text(response)
+        if text:
+            patched = _inject_html(text, is_auth)
+            if patched:
+                _LOGGER.warning("BT: HTML gepatcht voor %s (auth=%s)", request.path, is_auth)
+                return web.Response(text=patched, status=response.status,
+                                    content_type="text/html", charset="utf-8")
+            else:
+                _LOGGER.warning("BT: HTML skip voor %s (bt-hide al aanwezig: %s)", 
+                                request.path, "bt-hide" in (text or ""))
+        else:
+            _LOGGER.warning("BT: geen tekst voor %s type=%s", request.path, type(response).__name__)
+        return response
+    return handler
+
+
+def _make_manifest_handler(original):
+    async def manifest_handler(request):
+        response = await original(request)
+        try:
+            raw = getattr(response, "_body", None) or getattr(response, "body", None)
+            if raw:
+                m = json.loads(raw.decode("utf-8"))
+                m["name"] = "Btechnics IOT"
+                m["short_name"] = "Btechnics IOT"
+                for icon in m.get("icons", []):
+                    icon["src"] = "https://btechnics.be/logo_btechnics/btechnics-icon.png"
+                return web.Response(text=json.dumps(m), status=200,
+                                    content_type="application/manifest+json")
+        except Exception as err:
+            _LOGGER.warning("BT manifest fout: %s", err)
+        return response
+    return manifest_handler
+
+
+# Routes die zeker geen HTML zijn
+_SKIP_PREFIXES = (
+    '/api/', '/static/', '/frontend_latest/', '/frontend_es5/',
+    '/local/', '/hacsfiles/', '/_debugger', '/service_worker',
+    '/btechnics_branding/', '/auth/token', '/auth/revoke',
+    '/auth/link_user', '/auth/providers', '/auth/login_flow',
+    '/auth/external', '/media/', '/ai_task/',
+)
+
+
+def _patch_routes(app: web.Application) -> None:
+    patched = []
+    for resource in app.router.resources():
+        canonical = getattr(resource, 'canonical', '') or ''
+        if any(canonical.startswith(p) for p in _SKIP_PREFIXES):
+            continue
+        is_auth = 'authorize' in canonical or canonical == '/auth/authorize'
+        for route in resource:
+            if route.method not in ('GET', '*', 'HEAD'):
+                continue
+            try:
+                if canonical == '/manifest.json':
+                    route._handler = _make_manifest_handler(route._handler)
+                    patched.append('MANIFEST')
+                else:
+                    route._handler = _make_handler(route._handler, is_auth=is_auth)
+                    patched.append(canonical[:30])
+            except Exception as e:
+                _LOGGER.warning("BT patch fout %s: %s", canonical, e)
+    _LOGGER.warning("BT patch: %d routes - %s", len(patched), patched[:15])
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -126,27 +163,24 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
         ])
     except Exception as err:
         _LOGGER.warning("Static path: %s", err)
-
     hass.http.register_view(BtechnicsBrandingConfigView(hass))
-
     try:
         frontend.add_extra_js_url(hass, _JS_URL)
     except Exception as err:
         _LOGGER.warning("add_extra_js_url: %s", err)
-
-    _install_middleware(hass.http.app)
+    _patch_routes(hass.http.app)
 
     async def _delayed(_now=None):
-        _install_middleware(hass.http.app)
+        _patch_routes(hass.http.app)
 
     hass.bus.async_listen_once("homeassistant_started", _delayed)
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    _LOGGER.warning("BT: v1.18.0 klaar")
+    _LOGGER.warning("BT: v1.19.0 klaar")
     return True
 
 
 async def async_update_listener(hass: HomeAssistant, entry) -> None:
-    _LOGGER.warning("BT: instellingen bijgewerkt")
+    pass
 
 
 async def async_unload_entry(hass: HomeAssistant, entry) -> bool:
