@@ -1,4 +1,4 @@
-"""Btechnics IOT Branding v1.20.0."""
+"""Btechnics IOT Branding v1.21.0."""
 import json
 import logging
 import pathlib
@@ -21,8 +21,10 @@ _HIDE_CSS = (
     ".ohf-logo{display:none!important}"
     "</style>"
 )
-
-_AUTH_JS = """<script src="/btechnics_branding/btechnics-branding.js" type="module"></script>"""
+_AUTH_INJECT = (
+    _HIDE_CSS
+    + '<script src="/btechnics_branding/btechnics-branding.js" type="module"></script>'
+)
 
 
 class BtechnicsBrandingConfigView(HomeAssistantView):
@@ -46,85 +48,122 @@ class BtechnicsBrandingConfigView(HomeAssistantView):
         })
 
 
-def _read_text(response):
-    """Lees tekst uit response - alle mogelijke response types."""
-    if hasattr(response, "_path") and response._path:
-        try:
-            return pathlib.Path(str(response._path)).read_text("utf-8")
-        except Exception as e:
-            _LOGGER.warning("BT _path leesfout: %s", e)
-    for attr in ("_text", "_body", "body"):
-        val = getattr(response, attr, None)
-        if val:
-            if isinstance(val, bytes):
-                return val.decode(getattr(response, "charset", "utf-8") or "utf-8", errors="replace")
-            return val
+def _find_authorize_html() -> pathlib.Path | None:
+    """Zoek het authorize.html bestand in de homeassistant_frontend package."""
+    try:
+        import homeassistant_frontend
+        pkg_dir = pathlib.Path(homeassistant_frontend.__file__).parent
+        _LOGGER.warning("BT: frontend package: %s", pkg_dir)
+        for candidate in [
+            pkg_dir / "authorize.html",
+            pkg_dir / "www_static" / "authorize.html",
+            pkg_dir.parent / "authorize.html",
+        ]:
+            if candidate.exists():
+                _LOGGER.warning("BT: authorize.html gevonden: %s", candidate)
+                return candidate
+        # Zoek recursief
+        results = list(pkg_dir.rglob("authorize*.html"))
+        _LOGGER.warning("BT: authorize html search: %s", results)
+        if results:
+            return results[0]
+    except Exception as e:
+        _LOGGER.warning("BT: homeassistant_frontend import fout: %s", e)
     return None
 
 
-def _patch_html_response(response, path):
-    """Patch een HTML response met onze CSS/JS. Geeft nieuwe Response of None."""
-    ct = getattr(response, "content_type", "") or ""
-    if "text/html" not in ct:
-        return None
-    text = _read_text(response)
-    if not text:
-        _LOGGER.warning("BT: geen tekst voor %s (type=%s, ct=%s)", path, type(response).__name__, ct)
-        return None
-    if "bt-hide" in text:
-        return None  # al gepatcht
-    is_auth = "authorize" in path or "/auth/" in path
-    inject = _HIDE_CSS + (_AUTH_JS if is_auth else "")
-    patched = text.replace("<head>", "<head>" + inject, 1)
-    if patched == text:
-        return None
-    _LOGGER.warning("BT: HTML gepatcht voor %s (auth=%s)", path, is_auth)
-    return web.Response(text=patched, status=response.status,
-                        content_type="text/html", charset="utf-8")
+def _patch_html_file(html_path: pathlib.Path, inject: str) -> bool:
+    """Patch een HTML bestand met inject na <head>. Backup eerst."""
+    try:
+        original = html_path.read_text("utf-8")
+        if "bt-hide" in original:
+            _LOGGER.warning("BT: %s al gepatcht", html_path)
+            return True
+        if "<head>" not in original:
+            _LOGGER.warning("BT: geen <head> in %s", html_path)
+            return False
+        backup = html_path.with_suffix(".html.bak")
+        if not backup.exists():
+            backup.write_text(original, "utf-8")
+        patched = original.replace("<head>", "<head>" + inject, 1)
+        html_path.write_text(patched, "utf-8")
+        _LOGGER.warning("BT: %s gepatcht (backup: %s)", html_path, backup)
+        return True
+    except Exception as e:
+        _LOGGER.warning("BT: patch fout %s: %s", html_path, e)
+        return False
 
 
-def _patch_app(app: web.Application, label: str = "") -> None:
-    """Patch alle routes in een aiohttp app + manifest + _handle."""
-
-    # 1. Wrap _handle om ALLE requests te onderscheppen (ook subapp/auth)
-    if not getattr(app, "_bt_handle_patched", False):
-        orig_handle = app._handle
-
-        async def _bt_handle(request: web.Request) -> web.StreamResponse:
-            response = await orig_handle(request)
-            path = request.path
-
-            # Manifest
-            if path == "/manifest.json":
-                try:
-                    raw = getattr(response, "_body", None) or getattr(response, "body", None)
-                    if raw:
-                        m = json.loads(raw.decode("utf-8"))
-                        m["name"] = "Btechnics IOT"
-                        m["short_name"] = "Btechnics IOT"
-                        for icon in m.get("icons", []):
-                            icon["src"] = "https://btechnics.be/logo_btechnics/btechnics-icon.png"
-                        return web.Response(text=json.dumps(m), status=200,
-                                            content_type="application/manifest+json")
-                except Exception as e:
-                    _LOGGER.warning("BT manifest fout: %s", e)
+def _patch_main_routes(app: web.Application) -> None:
+    """Patch route handlers voor main HTML + manifest."""
+    def _make_html_handler(original):
+        async def h(request):
+            response = await original(request)
+            ct = getattr(response, "content_type", "") or ""
+            if "text/html" not in ct:
                 return response
+            text = None
+            if hasattr(response, "_path") and response._path:
+                try:
+                    text = pathlib.Path(str(response._path)).read_text("utf-8")
+                except Exception:
+                    pass
+            if text is None:
+                for attr in ("_text", "_body", "body"):
+                    val = getattr(response, attr, None)
+                    if val:
+                        text = val.decode("utf-8") if isinstance(val, bytes) else val
+                        break
+            if text and "<head>" in text and "bt-hide" not in text:
+                patched = text.replace("<head>", "<head>" + _HIDE_CSS, 1)
+                return web.Response(text=patched, status=response.status,
+                                    content_type="text/html", charset="utf-8")
+            return response
+        return h
 
-            # HTML patch
-            patched = _patch_html_response(response, path)
-            return patched if patched is not None else response
+    def _make_manifest_handler(original):
+        async def h(request):
+            response = await original(request)
+            try:
+                raw = getattr(response, "_body", None) or getattr(response, "body", None)
+                if raw:
+                    m = json.loads(raw.decode("utf-8"))
+                    m["name"] = "Btechnics IOT"
+                    m["short_name"] = "Btechnics IOT"
+                    for icon in m.get("icons", []):
+                        icon["src"] = "https://btechnics.be/logo_btechnics/btechnics-icon.png"
+                    return web.Response(text=json.dumps(m), status=200,
+                                        content_type="application/manifest+json")
+            except Exception as e:
+                _LOGGER.warning("BT manifest: %s", e)
+            return response
+        return h
 
-        app._handle = _bt_handle
-        app._bt_handle_patched = True
-        _LOGGER.warning("BT: _handle gepatcht voor app %s", label)
-
-    # 2. Patch ook alle subapps recursief
+    _SKIP = (
+        '/api/', '/static/', '/frontend_latest/', '/frontend_es5/',
+        '/local/', '/hacsfiles/', '/_debugger', '/service_worker',
+        '/btechnics_branding/', '/auth/token', '/auth/revoke',
+        '/auth/link_user', '/auth/providers', '/auth/login_flow',
+        '/auth/external', '/media/', '/ai_task/',
+    )
+    patched = []
     for resource in app.router.resources():
-        if hasattr(resource, '_app'):
-            subapp = resource._app
-            sublabel = label + "/" + (getattr(resource, 'canonical', '') or '?')
-            _LOGGER.warning("BT: subapp gevonden: %s", sublabel)
-            _patch_app(subapp, sublabel)
+        canonical = getattr(resource, 'canonical', '') or ''
+        if any(canonical.startswith(p) for p in _SKIP):
+            continue
+        for route in resource:
+            if route.method not in ('GET', '*', 'HEAD'):
+                continue
+            try:
+                if canonical == '/manifest.json':
+                    route._handler = _make_manifest_handler(route._handler)
+                    patched.append('MANIFEST')
+                else:
+                    route._handler = _make_html_handler(route._handler)
+                    patched.append(canonical[:20])
+            except Exception as e:
+                _LOGGER.warning("BT patch fout %s: %s", canonical, e)
+    _LOGGER.warning("BT: routes gepatcht: %s", patched[:10])
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -146,14 +185,22 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
     except Exception as err:
         _LOGGER.warning("add_extra_js_url: %s", err)
 
-    _patch_app(hass.http.app, "main")
+    # Patch routes voor de hoofdapp
+    _patch_main_routes(hass.http.app)
+
+    # Patch het authorize.html bestand DIRECT op disk
+    auth_html = _find_authorize_html()
+    if auth_html:
+        _patch_html_file(auth_html, _AUTH_INJECT)
+    else:
+        _LOGGER.warning("BT: authorize.html NIET gevonden - login pagina kan niet gepatcht worden")
 
     async def _delayed(_now=None):
-        _patch_app(hass.http.app, "main-delayed")
+        _patch_main_routes(hass.http.app)
 
     hass.bus.async_listen_once("homeassistant_started", _delayed)
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    _LOGGER.warning("BT: v1.20.0 klaar")
+    _LOGGER.warning("BT: v1.21.0 klaar")
     return True
 
 
@@ -162,4 +209,14 @@ async def async_update_listener(hass: HomeAssistant, entry) -> None:
 
 
 async def async_unload_entry(hass: HomeAssistant, entry) -> bool:
+    # Herstel authorize.html bij unload
+    try:
+        auth_html = _find_authorize_html()
+        if auth_html:
+            backup = auth_html.with_suffix(".html.bak")
+            if backup.exists():
+                auth_html.write_text(backup.read_text("utf-8"), "utf-8")
+                _LOGGER.warning("BT: authorize.html hersteld van backup")
+    except Exception as e:
+        _LOGGER.warning("BT unload: %s", e)
     return True
