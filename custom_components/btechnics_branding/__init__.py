@@ -1,5 +1,4 @@
 """Btechnics IOT Branding."""
-import asyncio
 import json
 import logging
 import pathlib
@@ -20,8 +19,14 @@ _HIDE_CSS = (
     "<style id='bt-hide'>"
     "#ha-launch-screen svg{display:none!important}"
     ".ohf-logo{display:none!important}"
+    "img[src*='favicon']{}"
     "</style>"
 )
+
+# Inline JS voor de auth pagina (extra_module_url werkt daar niet)
+_AUTH_JS = """<script>
+(function(){var BRAND="Btechnics IOT",ICON="https://btechnics.be/logo_btechnics/btechnics-icon.png",LOGIN_TEXT="Btechnics IOT",LOGIN_SIZE=24;fetch("/api/btechnics_branding/config").then(function(r){if(r.ok)return r.json()}).then(function(d){if(d){LOGIN_TEXT=d.login_text||LOGIN_TEXT;LOGIN_SIZE=d.login_text_size||LOGIN_SIZE}patch();setInterval(patch,1000)}).catch(function(){patch();setInterval(patch,1000)});function deepPatch(root){if(!root)return;root.querySelectorAll('img[src*="favicon"],img[src*="logo"]').forEach(function(img){if(!img.dataset.bt){img.src=ICON;img.dataset.bt="1"}});var walker=document.createTreeWalker(root,NodeFilter.SHOW_TEXT);var node;while((node=walker.nextNode())){if(node.textContent.includes("Welkom thuis")||node.textContent.includes("Welcome home")){var parent=node.parentElement;node.textContent=node.textContent.replace(/Welkom thuis!?/g,LOGIN_TEXT).replace(/Welcome home!?/g,LOGIN_TEXT);if(parent)parent.style.fontSize=LOGIN_SIZE+"px"}if(node.textContent.includes("Home Assistant")){node.textContent=node.textContent.replace(/Home Assistant/g,BRAND)}}root.querySelectorAll("*").forEach(function(el){if(el.shadowRoot)deepPatch(el.shadowRoot)})}function patch(){deepPatch(document.body);document.querySelectorAll('link[rel*="icon"]').forEach(function(l){l.remove()});var link=document.createElement("link");link.rel="icon";link.type="image/png";link.href=ICON;document.head.appendChild(link);if(document.title.includes("Home Assistant"))document.title=document.title.replace(/Home Assistant/g,BRAND)}new MutationObserver(patch).observe(document.documentElement,{childList:true,subtree:true})})();
+</script>"""
 
 _SKIP_PREFIXES = (
     '/api/', '/auth/', '/static/', '/frontend_latest/', '/frontend_es5/',
@@ -66,15 +71,15 @@ def _make_html_handler(original):
             if text is None and hasattr(response, "_body") and response._body:
                 text = response._body.decode("utf-8", errors="replace")
             if text and "<head>" in text and "bt-hide" not in text:
-                patched = text.replace("<head>", "<head>" + _HIDE_CSS, 1)
-                _LOGGER.warning("BT: CSS geinjecteerd voor %s", request.path)
+                # Injecteer CSS + inline JS voor auth pagina
+                inject = _HIDE_CSS
+                if "/auth/" in request.path or "authorize" in request.path:
+                    inject += _AUTH_JS
+                patched = text.replace("<head>", "<head>" + inject, 1)
                 return web.Response(
                     text=patched, status=response.status,
                     content_type="text/html", charset="utf-8",
                 )
-            else:
-                _LOGGER.warning("BT: HTML niet gepatcht ct=%s text=%s path=%s",
-                    ct, text is not None, request.path)
         except Exception as err:
             _LOGGER.warning("BT HTML fout: %s", err)
         return response
@@ -108,34 +113,23 @@ def _make_manifest_handler(original):
 
 def _patch_routes(app: web.Application) -> None:
     patched = []
-    html_routes = []
-
     for resource in app.router.resources():
         canonical = getattr(resource, 'canonical', '') or ''
-        res_type = type(resource).__name__
-
-        # Verzamel HTML-kandidaten voor diagnose
-        if not any(canonical.startswith(p) for p in _SKIP_PREFIXES):
-            html_routes.append(f"{res_type}:{canonical}")
-
         if any(canonical.startswith(p) for p in _SKIP_PREFIXES):
             continue
-
         for route in resource:
             if route.method not in ('GET', '*', 'HEAD'):
                 continue
             try:
                 if canonical == '/manifest.json':
                     route._handler = _make_manifest_handler(route._handler)
-                    patched.append(f"MANIFEST:{canonical}")
+                    patched.append('MANIFEST')
                 else:
                     route._handler = _make_html_handler(route._handler)
-                    patched.append(f"HTML:{canonical}")
+                    patched.append(canonical[:30])
             except Exception as e:
                 _LOGGER.warning("BT patch fout %s: %s", canonical, e)
-
-    _LOGGER.warning("BT: HTML-kandidaten (%d): %s", len(html_routes), html_routes[:20])
-    _LOGGER.warning("BT: gepatcht (%d): %s", len(patched), patched[:20])
+    _LOGGER.warning("BT: gepatcht: %s", patched[:10])
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -143,40 +137,31 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
-    _LOGGER.warning("BT: setup_entry start")
-
     try:
         await hass.http.async_register_static_paths([
             StaticPathConfig(_JS_URL, _JS_FILE, cache_headers=False)
         ])
     except Exception as err:
         _LOGGER.warning("Static path: %s", err)
-
     hass.http.register_view(BtechnicsBrandingConfigView(hass))
-
     try:
         frontend.add_extra_js_url(hass, _JS_URL)
     except Exception as err:
         _LOGGER.warning("add_extra_js_url: %s", err)
-
-    # Patch onmiddellijk
     try:
         _patch_routes(hass.http.app)
     except Exception as err:
-        _LOGGER.warning("route patch fout (direct): %s", err)
+        _LOGGER.warning("route patch fout: %s", err)
 
-    # Patch ook uitgesteld - na volledige HA startup
     async def _delayed_patch(_now=None):
-        _LOGGER.warning("BT: uitgestelde patch start")
         try:
             _patch_routes(hass.http.app)
         except Exception as err:
-            _LOGGER.warning("route patch fout (uitgesteld): %s", err)
+            _LOGGER.warning("uitgestelde patch fout: %s", err)
 
     hass.bus.async_listen_once("homeassistant_started", _delayed_patch)
-
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    _LOGGER.warning("BT: setup_entry volledig")
+    _LOGGER.warning("BT: setup volledig v1.16.0")
     return True
 
 
