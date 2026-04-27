@@ -1,5 +1,8 @@
 /**
- * Btechnics IOT Branding v1.7.0
+ * Btechnics IOT Branding v1.23.0
+ *
+ * v1.23.0: header version sync met manifest, geen functionele JS-wijzigingen
+ *          tov v1.7.0/v1.22.0.
  */
 const BRAND = "Btechnics IOT";
 
