@@ -1,8 +1,13 @@
-"""Btechnics IOT Branding v1.22.0.
+"""Btechnics IOT Branding v1.23.0.
 
-Bug fix: FileResponse heeft geen content_type tot prepare() wordt aangeroepen.
-Vorige versies faalden stilletjes op de auth pagina omdat content_type leeg was.
-Fix: controleer response._path extensie voor FileResponse objecten.
+v1.23.0:
+- PWA app iconen lokaal in de integratie (app-icon-192.png, app-icon-512.png)
+- Manifest icons array volledig herschreven met correcte sizes (lost Lighthouse
+  waarschuwing op over mismatch tussen opgegeven en werkelijke icoongrootte)
+- Geen externe afhankelijkheid van btechnics.be meer voor de PWA install
+
+v1.22.0:
+- FileResponse content_type fix voor de auth pagina
 """
 import json
 import logging
@@ -16,8 +21,15 @@ from homeassistant.core import HomeAssistant
 _LOGGER = logging.getLogger(__name__)
 DOMAIN = "btechnics_branding"
 _DIR = pathlib.Path(__file__).parent
+
 _JS_FILE = str(_DIR / "btechnics-branding.js")
 _JS_URL = "/btechnics_branding/btechnics-branding.js"
+
+_ICON_512_FILE = str(_DIR / "app-icon-512.png")
+_ICON_512_URL = "/btechnics_branding/app-icon-512.png"
+_ICON_192_FILE = str(_DIR / "app-icon-192.png")
+_ICON_192_URL = "/btechnics_branding/app-icon-192.png"
+
 _API_URL = "/api/btechnics_branding/config"
 
 _HIDE_CSS = (
@@ -58,20 +70,20 @@ def _patch_response(response, request_path: str):
     """
     text = None
 
-    # --- Geval 1: FileResponse - lees van _path ---
+    # Geval 1 FileResponse, lees van _path
     file_path = getattr(response, "_path", None)
     if file_path:
         p = pathlib.Path(str(file_path))
         if p.suffix.lower() not in (".html", ".htm"):
-            return None  # geen HTML, overslaan
+            return None
         try:
             text = p.read_text("utf-8")
             _LOGGER.warning("BT: FileResponse gelezen: %s (pad: %s)", request_path, p)
         except Exception as e:
-            _LOGGER.warning("BT: FileResponse leesfoout %s: %s", p, e)
+            _LOGGER.warning("BT: FileResponse leesfout %s: %s", p, e)
             return None
 
-    # --- Geval 2: gewone Response - check content_type ---
+    # Geval 2 gewone Response, check content_type
     else:
         ct = getattr(response, "content_type", "") or ""
         if "text/html" not in ct:
@@ -87,7 +99,7 @@ def _patch_response(response, request_path: str):
         return None
 
     if "bt-hide" in text:
-        return None  # al gepatcht
+        return None
 
     is_auth = "authorize" in request_path or "/auth/" in request_path
     inject = _HIDE_CSS + (_EXT_SCRIPT if is_auth else "")
@@ -118,11 +130,23 @@ def _make_manifest_handler(original):
                 m = json.loads(raw.decode("utf-8"))
                 m["name"] = "Btechnics IOT"
                 m["short_name"] = "Btechnics IOT"
-                for icon in m.get("icons", []):
-                    icon["src"] = "https://btechnics.be/logo_btechnics/btechnics-icon.png"
+                m["icons"] = [
+                    {
+                        "src": _ICON_192_URL,
+                        "sizes": "192x192",
+                        "type": "image/png",
+                        "purpose": "any maskable",
+                    },
+                    {
+                        "src": _ICON_512_URL,
+                        "sizes": "512x512",
+                        "type": "image/png",
+                        "purpose": "any maskable",
+                    },
+                ]
                 return web.Response(
                     text=json.dumps(m), status=200,
-                    content_type="application/manifest+json"
+                    content_type="application/manifest+json",
                 )
         except Exception as e:
             _LOGGER.warning("BT manifest fout: %s", e)
@@ -167,7 +191,9 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
     try:
         await hass.http.async_register_static_paths([
-            StaticPathConfig(_JS_URL, _JS_FILE, cache_headers=False)
+            StaticPathConfig(_JS_URL, _JS_FILE, cache_headers=False),
+            StaticPathConfig(_ICON_512_URL, _ICON_512_FILE, cache_headers=True),
+            StaticPathConfig(_ICON_192_URL, _ICON_192_FILE, cache_headers=True),
         ])
     except Exception as err:
         _LOGGER.warning("Static path: %s", err)
@@ -186,7 +212,7 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
 
     hass.bus.async_listen_once("homeassistant_started", _delayed)
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    _LOGGER.warning("BT: v1.22.0 klaar - FileResponse fix actief")
+    _LOGGER.warning("BT: v1.23.0 klaar, lokale PWA iconen actief")
     return True
 
 
