@@ -3,12 +3,25 @@
     "step": {
       "user": {
         "title": "Btechnics IOT",
-        "description": "Installs the Btechnics IOT branding."
+        "description": "Installs the Btechnics IOT branding. Configure the texts via the gear icon after installation."
       }
     },
     "abort": {
       "already_configured": "Btechnics IOT is already configured."
     },
     "error": {}
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Btechnics IOT settings",
+        "data": {
+          "login_text": "Login screen text",
+          "login_text_size": "Login text size (px)",
+          "sidebar_text": "Sidebar text",
+          "sidebar_text_size": "Sidebar text size (px)"
+        }
+      }
+    }
   }
 }
