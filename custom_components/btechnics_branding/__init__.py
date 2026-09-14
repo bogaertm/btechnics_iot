@@ -1,4 +1,7 @@
-"""Btechnics IOT Branding v1.25.0.
+"""Btechnics IOT Branding v1.25.1.
+
+v1.25.1:
+- JS: actieve tabs in petrol header/bottom bar in goud (leesbaarheid mobiel)
 
 v1.25.0:
 - JS: Btechnics kleurenschema (petrol primair, oranje accent, petrol sidebar
@@ -353,7 +356,7 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
 
     hass.bus.async_listen_once("homeassistant_started", _delayed)
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    _LOGGER.warning("BT: v1.25.0 klaar, brands API en inline logo overschreven")
+    _LOGGER.warning("BT: v1.25.1 klaar, brands API en inline logo overschreven")
     return True
 
 

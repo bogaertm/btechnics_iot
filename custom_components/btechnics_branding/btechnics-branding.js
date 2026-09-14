@@ -1,5 +1,8 @@
 /**
- * Btechnics IOT Branding v1.25.0
+ * Btechnics IOT Branding v1.25.1
+ *
+ * v1.25.1: actieve tabs in de petrol header/bottom bar in goud (waren petrol
+ *          op petrol, onleesbaar op mobiel).
  *
  * v1.25.0: Btechnics kleuren: HA blauw vervangen door petrol (#00222b) als
  *          primaire kleur, oranje (#ed6928) als accent, sidebar en header
@@ -257,6 +260,7 @@ function patchColors() {
     "--app-header-edit-background-color": BT_COLORS.scale["30"],
     "--app-header-border-bottom": "1px solid rgba(255,255,255,0.08)",
     "--app-theme-color": BT_COLORS.petrol,
+    "--app-header-selection-bar-color": BT_COLORS.gold,
   };
   for (const k in BT_COLORS.scale) vars["--ha-color-primary-" + k] = BT_COLORS.scale[k];
   for (const k in vars) {
@@ -272,6 +276,17 @@ function patchColors() {
     sidebar.style.setProperty("--secondary-text-color", "#9db2ba");
     sidebar.dataset.btColors = "1";
   }
+  // tabs in de petrol header/bottom bar (Instellingen, Profiel, ...): actieve tab
+  // gebruikt --primary-color en zou anders petrol op petrol zijn -> goud
+  deepQuery(document, "hass-tabs-subpage").forEach(p => {
+    const bar = p.shadowRoot?.querySelector("#tabbar");
+    if (bar && !bar.dataset.btColors) {
+      bar.style.setProperty("--primary-color", BT_COLORS.gold);
+      bar.style.setProperty("--ha-tab-active-text-color", BT_COLORS.gold);
+      bar.style.setProperty("--ha-tab-indicator-color", BT_COLORS.gold);
+      bar.dataset.btColors = "1";
+    }
+  });
   let meta = document.querySelector('meta[name="theme-color"]');
   if (meta && meta.content !== BT_COLORS.petrol) meta.content = BT_COLORS.petrol;
 }
