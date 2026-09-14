@@ -1,5 +1,9 @@
 /**
- * Btechnics IOT Branding v1.25.2
+ * Btechnics IOT Branding v1.26.0
+ *
+ * v1.26.0: sidebar en header terug licht zoals origineel HA. Petrol enkel als
+ *          primaire kleur (knoppen, links, actieve iconen, toggles, lichte
+ *          achtergronden), oranje als accent.
  *
  * v1.25.2: brand map (icon.png, logo.png, dark_logo.png) toegevoegd zodat HA's
  *          brands API het Btechnics icoon serveert voor deze integratie; HACS
@@ -264,46 +268,11 @@ function patchColors() {
     "--accent-color": BT_COLORS.orange,
     "--rgb-accent-color": "237, 105, 40",
     "--ha-color-text-link": primary,
-    "--sidebar-background-color": BT_COLORS.petrol,
-    "--sidebar-text-color": "#dbe4e8",
-    "--sidebar-icon-color": "#9db2ba",
-    "--sidebar-selected-text-color": BT_COLORS.gold,
-    "--sidebar-selected-icon-color": BT_COLORS.gold,
-    "--sidebar-menu-button-background-color": BT_COLORS.petrol,
-    "--app-header-background-color": BT_COLORS.petrol,
-    "--app-header-text-color": "#ffffff",
-    "--app-header-edit-background-color": BT_COLORS.scale["30"],
-    "--app-header-border-bottom": "1px solid rgba(255,255,255,0.08)",
-    "--app-theme-color": BT_COLORS.petrol,
-    "--app-header-selection-bar-color": BT_COLORS.gold,
   };
   for (const k in BT_COLORS.scale) vars["--ha-color-primary-" + k] = BT_COLORS.scale[k];
   for (const k in vars) {
     if (root.style.getPropertyValue(k) !== vars[k]) root.style.setProperty(k, vars[k]);
   }
-  // scheidingslijnen in de donkere sidebar
-  const ha = document.querySelector("home-assistant");
-  const main = ha?.shadowRoot?.querySelector("home-assistant-main");
-  const sidebar = main?.shadowRoot?.querySelector("ha-sidebar");
-  if (sidebar && !sidebar.dataset.btColors) {
-    sidebar.style.setProperty("--divider-color", "rgba(255,255,255,0.12)");
-    sidebar.style.setProperty("--primary-text-color", "#dbe4e8");
-    sidebar.style.setProperty("--secondary-text-color", "#9db2ba");
-    sidebar.dataset.btColors = "1";
-  }
-  // tabs in de petrol header/bottom bar (Instellingen, Profiel, ...): actieve tab
-  // gebruikt --primary-color en zou anders petrol op petrol zijn -> goud
-  deepQuery(document, "hass-tabs-subpage").forEach(p => {
-    const bar = p.shadowRoot?.querySelector("#tabbar");
-    if (bar && !bar.dataset.btColors) {
-      bar.style.setProperty("--primary-color", BT_COLORS.gold);
-      bar.style.setProperty("--ha-tab-active-text-color", BT_COLORS.gold);
-      bar.style.setProperty("--ha-tab-indicator-color", BT_COLORS.gold);
-      bar.dataset.btColors = "1";
-    }
-  });
-  let meta = document.querySelector('meta[name="theme-color"]');
-  if (meta && meta.content !== BT_COLORS.petrol) meta.content = BT_COLORS.petrol;
 }
 
 function patchTitle() {

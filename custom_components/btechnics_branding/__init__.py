@@ -1,4 +1,7 @@
-"""Btechnics IOT Branding v1.25.2.
+"""Btechnics IOT Branding v1.26.0.
+
+v1.26.0:
+- JS: sidebar en header terug licht (origineel), petrol enkel als primaire kleur
 
 v1.25.2:
 - brand/ map met icon.png, logo.png, dark_logo.png: HA brands API serveert nu
@@ -361,7 +364,7 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
 
     hass.bus.async_listen_once("homeassistant_started", _delayed)
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    _LOGGER.warning("BT: v1.25.2 klaar, brands API en inline logo overschreven")
+    _LOGGER.warning("BT: v1.26.0 klaar, brands API en inline logo overschreven")
     return True
 
 
