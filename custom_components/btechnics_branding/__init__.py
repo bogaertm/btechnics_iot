@@ -1,4 +1,11 @@
-"""Btechnics IOT Branding v1.24.0.
+"""Btechnics IOT Branding v1.25.0.
+
+v1.25.0:
+- JS: Btechnics kleurenschema (petrol primair, oranje accent, petrol sidebar
+  en header, gouden actieve items).
+- btechnics-branding.js via eigen view met Cache-Control no-store, zodat
+  Cloudflare (of een andere proxy) de JS niet 4 uur cachet na een update.
+- JS: "Tip!" balk in Instellingen (ha-tip) verborgen.
 
 v1.24.0:
 - Brands API onderschept: /api/brands/integration/{homeassistant,hassio,demo}/*
@@ -61,6 +68,24 @@ _HIDE_CSS = (
     "</style>"
 )
 _EXT_SCRIPT = '<script src="/btechnics_branding/btechnics-branding.js" type="module"></script>'
+
+
+class BtechnicsBrandingJsView(HomeAssistantView):
+    """Serveert de branding JS zonder caching (Cloudflare cachet .js anders 4u)."""
+
+    url = _JS_URL
+    name = "btechnics_branding:js"
+    requires_auth = False
+
+    async def get(self, request):
+        return web.FileResponse(
+            _JS_FILE,
+            headers={
+                "Cache-Control": "no-store, no-cache, must-revalidate, max-age=0",
+                "Pragma": "no-cache",
+                "Content-Type": "application/javascript; charset=utf-8",
+            },
+        )
 
 
 class BtechnicsBrandingConfigView(HomeAssistantView):
@@ -302,7 +327,6 @@ async def async_setup(hass: HomeAssistant, config: dict) -> bool:
 async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
     try:
         await hass.http.async_register_static_paths([
-            StaticPathConfig(_JS_URL, _JS_FILE, cache_headers=False),
             StaticPathConfig(_ICON_512_URL, _ICON_512_FILE, cache_headers=True),
             StaticPathConfig(_ICON_192_URL, _ICON_192_FILE, cache_headers=True),
             StaticPathConfig(_LOGO_SVG_URL, _LOGO_SVG_FILE, cache_headers=True),
@@ -310,6 +334,7 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
     except Exception as err:
         _LOGGER.warning("Static path: %s", err)
 
+    hass.http.register_view(BtechnicsBrandingJsView())
     hass.http.register_view(BtechnicsBrandingConfigView(hass))
 
     try:
@@ -328,7 +353,7 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
 
     hass.bus.async_listen_once("homeassistant_started", _delayed)
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    _LOGGER.warning("BT: v1.24.0 klaar, brands API en inline logo overschreven")
+    _LOGGER.warning("BT: v1.25.0 klaar, brands API en inline logo overschreven")
     return True
 
 

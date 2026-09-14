@@ -1,5 +1,10 @@
 /**
- * Btechnics IOT Branding v1.24.0
+ * Btechnics IOT Branding v1.25.0
+ *
+ * v1.25.0: Btechnics kleuren: HA blauw vervangen door petrol (#00222b) als
+ *          primaire kleur, oranje (#ed6928) als accent, sidebar en header
+ *          petrol met gouden actieve items. Donkere modus krijgt lichtere
+ *          petrol tinten voor links en knoppen. Tips balk (ha-tip) verborgen.
  *
  * v1.24.0: Open Home Foundation kaart en links naar home-assistant.io /
  *          openhomefoundation.org verborgen of omgeleid naar btechnics.be.
@@ -189,6 +194,8 @@ const BT_SITE      = "https://btechnics.be";
 function patchExternalLinks() {
   // Open Home Foundation kaart op de Info pagina
   deepQuery(document, "ha-card.ohf").forEach(c => { c.style.display = "none"; });
+  // "Tip!" balk onderaan Instellingen (forums, socials, blog, nieuwsbrief, sneltoetsen)
+  deepQuery(document, "ha-tip").forEach(c => { c.style.display = "none"; });
   deepQuery(document, "a[href]").forEach(a => {
     const href = a.getAttribute("href") || "";
     if (!EXT_HA_RE.test(href) || a.dataset.bt) return;
@@ -202,6 +209,71 @@ function patchExternalLinks() {
       a.setAttribute("href", BT_SITE);
     }
   });
+}
+
+// Btechnics kleuren: petrol (app icoon) als primaire kleur, oranje als accent
+const BT_COLORS = {
+  petrol: "#00222b", orange: "#ed6928", gold: "#f59e32",
+  scale: { // petrol tinten, 05 donker -> 95 licht
+    "05": "#000c10", "10": "#001820", "20": "#00222b", "30": "#003a4a",
+    "40": "#00222b", "50": "#0f6b85", "60": "#3f98b3", "70": "#7fbfd2",
+    "80": "#b7dbe6", "90": "#dde9ee", "95": "#eef4f6",
+  },
+};
+
+function isDarkMode() {
+  try {
+    const bg = getComputedStyle(document.documentElement)
+      .getPropertyValue("--primary-background-color").trim();
+    const m = bg.match(/^#([0-9a-f]{6})$/i);
+    if (!m) return window.matchMedia("(prefers-color-scheme: dark)").matches;
+    const v = parseInt(m[1], 16);
+    const lum = ((v >> 16) & 255) * 0.299 + ((v >> 8) & 255) * 0.587 + (v & 255) * 0.114;
+    return lum < 128;
+  } catch(e) { return false; }
+}
+
+function patchColors() {
+  const root = document.documentElement;
+  const dark = isDarkMode();
+  const primary = dark ? BT_COLORS.scale["70"] : BT_COLORS.petrol;
+  const vars = {
+    "--primary-color": primary,
+    "--dark-primary-color": dark ? BT_COLORS.scale["60"] : BT_COLORS.scale["10"],
+    "--darker-primary-color": dark ? BT_COLORS.scale["50"] : BT_COLORS.scale["05"],
+    "--light-primary-color": dark ? BT_COLORS.scale["30"] : BT_COLORS.scale["80"],
+    "--rgb-primary-color": dark ? "127, 191, 210" : "0, 34, 43",
+    "--accent-color": BT_COLORS.orange,
+    "--rgb-accent-color": "237, 105, 40",
+    "--ha-color-text-link": primary,
+    "--sidebar-background-color": BT_COLORS.petrol,
+    "--sidebar-text-color": "#dbe4e8",
+    "--sidebar-icon-color": "#9db2ba",
+    "--sidebar-selected-text-color": BT_COLORS.gold,
+    "--sidebar-selected-icon-color": BT_COLORS.gold,
+    "--sidebar-menu-button-background-color": BT_COLORS.petrol,
+    "--app-header-background-color": BT_COLORS.petrol,
+    "--app-header-text-color": "#ffffff",
+    "--app-header-edit-background-color": BT_COLORS.scale["30"],
+    "--app-header-border-bottom": "1px solid rgba(255,255,255,0.08)",
+    "--app-theme-color": BT_COLORS.petrol,
+  };
+  for (const k in BT_COLORS.scale) vars["--ha-color-primary-" + k] = BT_COLORS.scale[k];
+  for (const k in vars) {
+    if (root.style.getPropertyValue(k) !== vars[k]) root.style.setProperty(k, vars[k]);
+  }
+  // scheidingslijnen in de donkere sidebar
+  const ha = document.querySelector("home-assistant");
+  const main = ha?.shadowRoot?.querySelector("home-assistant-main");
+  const sidebar = main?.shadowRoot?.querySelector("ha-sidebar");
+  if (sidebar && !sidebar.dataset.btColors) {
+    sidebar.style.setProperty("--divider-color", "rgba(255,255,255,0.12)");
+    sidebar.style.setProperty("--primary-text-color", "#dbe4e8");
+    sidebar.style.setProperty("--secondary-text-color", "#9db2ba");
+    sidebar.dataset.btColors = "1";
+  }
+  let meta = document.querySelector('meta[name="theme-color"]');
+  if (meta && meta.content !== BT_COLORS.petrol) meta.content = BT_COLORS.petrol;
 }
 
 function patchTitle() {
@@ -222,6 +294,7 @@ function patchAll() {
   patchSidebar();
   patchInlineLogos();
   patchExternalLinks();
+  patchColors();
   patchTitle();
   deepReplaceText(document.body, "Home Assistant", BRAND);
   deepReplaceAttrs(document.body, "Home Assistant", BRAND);
@@ -229,6 +302,7 @@ function patchAll() {
 
 (async () => {
   await loadConfig();
+  patchColors();
   patchLaunchScreen();
   patchTitle();
   patchFavicon();
