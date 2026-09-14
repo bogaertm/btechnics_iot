@@ -1,4 +1,21 @@
-"""Btechnics IOT Branding v1.23.0.
+"""Btechnics IOT Branding v1.24.0.
+
+v1.24.0:
+- Brands API onderschept: /api/brands/integration/{homeassistant,hassio,demo}/*
+  geeft nu het Btechnics icoon terug. Dit vervangt het HA huisje in o.a. de
+  update dialogen (Core/Supervisor/OS), de updatelijst in Instellingen, de
+  integratiepagina en overal waar de frontend een brand icoon opvraagt.
+- JS: inline HA logo (ha-logo-svg en ha-svg-icon met het HA pad) wordt
+  vervangen door het Btechnics icoon (Home paneel, Info pagina, ...)
+- Static route onderschept: /static/icons/favicon*.png, favicon.ico,
+  mask-icon.svg, apple touch iconen en /static/images/home-assistant-logo-*.svg
+  komen nu uit de integratie (QR code logo, tag dialoog, login pagina, tabblad)
+- Launch screen: HA gebruikt nu een <img class="ha-logo"> ipv inline svg;
+  wordt nu ook verborgen en vervangen
+- JS: ook alt/title/aria-label attributen met "Home Assistant" worden vervangen
+- logo.svg en favicon.ico lokaal in de integratie
+- JS: Open Home Foundation kaart (Info pagina) verborgen; release notes,
+  community en OHF links verborgen; overige home-assistant.io links -> btechnics.be
 
 v1.23.0:
 - PWA app iconen lokaal in de integratie (app-icon-192.png, app-icon-512.png)
@@ -12,6 +29,7 @@ v1.22.0:
 import json
 import logging
 import pathlib
+import re
 
 from aiohttp import web
 from homeassistant.components import frontend
@@ -30,11 +48,15 @@ _ICON_512_URL = "/btechnics_branding/app-icon-512.png"
 _ICON_192_FILE = str(_DIR / "app-icon-192.png")
 _ICON_192_URL = "/btechnics_branding/app-icon-192.png"
 
+_LOGO_SVG_FILE = str(_DIR / "logo.svg")
+_LOGO_SVG_URL = "/btechnics_branding/logo.svg"
+_FAVICON_ICO_FILE = str(_DIR / "favicon.ico")
+
 _API_URL = "/api/btechnics_branding/config"
 
 _HIDE_CSS = (
     "<style id='bt-hide'>"
-    "#ha-launch-screen svg{display:none!important}"
+    "#ha-launch-screen svg,#ha-launch-screen img.ha-logo{display:none!important}"
     ".ohf-logo{display:none!important}"
     "</style>"
 )
@@ -154,6 +176,95 @@ def _make_manifest_handler(original):
     return handler
 
 
+_BRANDS_CANONICAL = "/api/brands/integration/{domain}/{image}"
+_BRANDS_DOMAINS = ("homeassistant", "hassio", "demo")
+_BRANDS_MARK = "_bt_brands_patched"
+
+
+def _make_brands_handler(original):
+    async def handler(request):
+        domain = request.match_info.get("domain", "")
+        image = request.match_info.get("image", "")
+        if domain in _BRANDS_DOMAINS:
+            path = _ICON_512_FILE if "@2x" in image or "logo" in image else _ICON_192_FILE
+            return web.FileResponse(
+                path,
+                headers={"Cache-Control": "public, max-age=86400"},
+            )
+        return await original(request)
+    handler._bt_brands_patched = True  # type: ignore[attr-defined]
+    return handler
+
+
+def _patch_brands_route(app: web.Application) -> None:
+    for resource in app.router.resources():
+        canonical = getattr(resource, "canonical", "") or ""
+        if canonical != _BRANDS_CANONICAL:
+            continue
+        for route in resource:
+            if route.method not in ("GET", "*", "HEAD"):
+                continue
+            if getattr(route._handler, _BRANDS_MARK, False):
+                continue
+            try:
+                route._handler = _make_brands_handler(route._handler)
+                _LOGGER.warning("BT: brands route gepatcht (%s)", _BRANDS_DOMAINS)
+            except Exception as e:
+                _LOGGER.warning("BT brands patch fout: %s", e)
+
+
+# Static bestanden van HA die het HA logo bevatten -> vervangen door Btechnics
+_STATIC_PREFIX = "/static/"
+_STATIC_RE = re.compile(
+    r"^/static/(icons/(favicon[^/]*\.png|favicon\.ico|mask-icon\.svg|"
+    r"apple-touch-icon[^/]*\.png|ha-icon[^/]*\.png)"
+    r"|images/home-assistant-logo[^/]*\.svg)$"
+)
+
+
+def _static_override(path: str):
+    if not _STATIC_RE.match(path):
+        return None
+    if path.endswith(".ico"):
+        return _FAVICON_ICO_FILE, "image/x-icon"
+    if path.endswith(".svg"):
+        return _LOGO_SVG_FILE, "image/svg+xml"
+    if "512" in path or "384" in path:
+        return _ICON_512_FILE, "image/png"
+    return _ICON_192_FILE, "image/png"
+
+
+def _make_static_handler(original):
+    async def handler(request):
+        override = _static_override(request.path)
+        if override:
+            file_path, ctype = override
+            return web.FileResponse(
+                file_path,
+                headers={"Cache-Control": "public, max-age=86400", "Content-Type": ctype},
+            )
+        return await original(request)
+    handler._bt_static_patched = True  # type: ignore[attr-defined]
+    return handler
+
+
+def _patch_static_route(app: web.Application) -> None:
+    for resource in app.router.resources():
+        canonical = getattr(resource, "canonical", "") or ""
+        if canonical.rstrip("/") != "/static":
+            continue
+        for route in resource:
+            if route.method not in ("GET", "*", "HEAD"):
+                continue
+            if getattr(route._handler, "_bt_static_patched", False):
+                continue
+            try:
+                route._handler = _make_static_handler(route._handler)
+                _LOGGER.warning("BT: static route gepatcht (%s)", canonical)
+            except Exception as e:
+                _LOGGER.warning("BT static patch fout: %s", e)
+
+
 _SKIP = (
     "/api/", "/static/", "/frontend_latest/", "/frontend_es5/",
     "/local/", "/hacsfiles/", "/_debugger", "/service_worker",
@@ -194,6 +305,7 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
             StaticPathConfig(_JS_URL, _JS_FILE, cache_headers=False),
             StaticPathConfig(_ICON_512_URL, _ICON_512_FILE, cache_headers=True),
             StaticPathConfig(_ICON_192_URL, _ICON_192_FILE, cache_headers=True),
+            StaticPathConfig(_LOGO_SVG_URL, _LOGO_SVG_FILE, cache_headers=True),
         ])
     except Exception as err:
         _LOGGER.warning("Static path: %s", err)
@@ -206,13 +318,17 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
         _LOGGER.warning("add_extra_js_url: %s", err)
 
     _patch_routes(hass.http.app)
+    _patch_brands_route(hass.http.app)
+    _patch_static_route(hass.http.app)
 
     async def _delayed(_now=None):
         _patch_routes(hass.http.app)
+        _patch_brands_route(hass.http.app)
+        _patch_static_route(hass.http.app)
 
     hass.bus.async_listen_once("homeassistant_started", _delayed)
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    _LOGGER.warning("BT: v1.23.0 klaar, lokale PWA iconen actief")
+    _LOGGER.warning("BT: v1.24.0 klaar, brands API en inline logo overschreven")
     return True
 
 

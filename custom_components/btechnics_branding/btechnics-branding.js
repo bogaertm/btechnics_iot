@@ -1,14 +1,18 @@
 /**
- * Btechnics IOT Branding v1.23.0
+ * Btechnics IOT Branding v1.24.0
  *
- * v1.23.0: header version sync met manifest, geen functionele JS-wijzigingen
- *          tov v1.7.0/v1.22.0.
+ * v1.24.0: Open Home Foundation kaart en links naar home-assistant.io /
+ *          openhomefoundation.org verborgen of omgeleid naar btechnics.be.
+ *          Inline HA logo's (ha-logo-svg, ha-svg-icon met HA pad) en img's
+ *          die naar het HA brand icoon wijzen worden vervangen door het
+ *          Btechnics icoon. Brand icoon URLs zelf worden backend-side
+ *          onderschept (zie __init__.py).
  */
 const BRAND = "Btechnics IOT";
 
 const BT = {
-  logo: "https://btechnics.be/logo_btechnics/btechnics.svg",
-  icon: "https://btechnics.be/logo_btechnics/btechnics-icon.png",
+  logo: "/btechnics_branding/logo.svg",
+  icon: "/btechnics_branding/app-icon-192.png",
   loginText: BRAND,
   loginSize: 24,
   sidebarText: BRAND,
@@ -30,8 +34,9 @@ async function loadConfig() {
 
 const style = document.createElement("style");
 style.textContent = `
-  #ha-launch-screen svg { display: none !important; }
-  .ohf-logo             { display: none !important; }
+  #ha-launch-screen svg,
+  #ha-launch-screen img.ha-logo { display: none !important; }
+  .ohf-logo                     { display: none !important; }
 `;
 document.head.appendChild(style);
 
@@ -70,8 +75,8 @@ function patchLaunchScreen() {
   img.className = "bt-logo";
   img.src = BT.logo;
   img.style.cssText = "height:80px;width:auto;flex-shrink:0;";
-  const svg = screen.querySelector("svg");
-  if (svg) svg.parentNode.insertBefore(img, svg);
+  const old = screen.querySelector("svg, img.ha-logo");
+  if (old) old.parentNode.insertBefore(img, old);
   else screen.prepend(img);
 }
 
@@ -132,6 +137,73 @@ function patchSidebar() {
   span.style.fontSize = BT.sidebarSize + "px";
 }
 
+// mdiHomeAssistant pad begint zo (src/resources/home-assistant-logo-svg.ts)
+const HA_PATH_PREFIX = "m12.151 1.5882";
+const HA_BRAND_RE = /(brands\.home-assistant\.io\/(_\/)?|\/api\/brands\/integration\/)(homeassistant|hassio|demo)\//;
+
+function swapSvgForIcon(host) {
+  const sr = host.shadowRoot;
+  if (!sr || sr.querySelector(".bt-inline-logo")) return;
+  const svg = sr.querySelector("svg");
+  if (!svg) return;
+  svg.style.display = "none";
+  const img = document.createElement("img");
+  img.className = "bt-inline-logo";
+  img.src = BT.icon;
+  img.style.cssText = "width:100%;height:100%;object-fit:contain;display:block;";
+  sr.appendChild(img);
+}
+
+const TEXT_ATTRS = ["alt", "title", "aria-label", "placeholder"];
+function deepReplaceAttrs(root, from, to) {
+  try {
+    for (const el of root.querySelectorAll("*")) {
+      for (const a of TEXT_ATTRS) {
+        const v = el.getAttribute(a);
+        if (v && v.includes(from)) el.setAttribute(a, v.split(from).join(to));
+      }
+      if (el.shadowRoot) deepReplaceAttrs(el.shadowRoot, from, to);
+    }
+  } catch(e) {}
+}
+
+function patchInlineLogos() {
+  deepQuery(document, "ha-logo-svg").forEach(swapSvgForIcon);
+  deepQuery(document, "ha-svg-icon").forEach(el => {
+    const p = el.path || el.getAttribute("path") || "";
+    if (p.startsWith(HA_PATH_PREFIX)) swapSvgForIcon(el);
+  });
+  deepQuery(document, "img").forEach(img => {
+    if (!img.dataset.bt && HA_BRAND_RE.test(img.getAttribute("src") || "")) {
+      img.src = BT.icon;
+      img.dataset.bt = "1";
+    }
+  });
+}
+
+// Externe HA / Open Home Foundation verwijzingen
+const EXT_HIDE_RE  = /openhomefoundation\.org|community\.home-assistant\.io|release-notes|\/blog\//;
+const EXT_HA_RE    = /home-assistant\.io|openhomefoundation\.org/;
+const BT_SITE      = "https://btechnics.be";
+
+function patchExternalLinks() {
+  // Open Home Foundation kaart op de Info pagina
+  deepQuery(document, "ha-card.ohf").forEach(c => { c.style.display = "none"; });
+  deepQuery(document, "a[href]").forEach(a => {
+    const href = a.getAttribute("href") || "";
+    if (!EXT_HA_RE.test(href) || a.dataset.bt) return;
+    a.dataset.bt = "1";
+    if (EXT_HIDE_RE.test(href)) {
+      // release notes, community, OHF: link volledig verbergen (rij erboven mee)
+      const row = a.closest(".row") || a;
+      row.style.display = "none";
+    } else {
+      // documentatie/logo links: naar btechnics.be
+      a.setAttribute("href", BT_SITE);
+    }
+  });
+}
+
 function patchTitle() {
   if (document.title.includes("Home Assistant"))
     document.title = document.title.replace(/Home Assistant/g, BRAND);
@@ -148,8 +220,11 @@ function patchAll() {
   patchLaunchScreen();
   patchLoginPage();
   patchSidebar();
+  patchInlineLogos();
+  patchExternalLinks();
   patchTitle();
   deepReplaceText(document.body, "Home Assistant", BRAND);
+  deepReplaceAttrs(document.body, "Home Assistant", BRAND);
 }
 
 (async () => {
