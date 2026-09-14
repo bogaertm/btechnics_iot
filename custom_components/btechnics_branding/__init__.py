@@ -1,4 +1,9 @@
-"""Btechnics IOT Branding v1.25.1.
+"""Btechnics IOT Branding v1.25.2.
+
+v1.25.2:
+- brand/ map met icon.png, logo.png, dark_logo.png: HA brands API serveert nu
+  het Btechnics icoon voor btechnics_branding (integratiepagina, HACS)
+- JS: HACS update entiteit (CDN placeholder) krijgt het lokale icoon
 
 v1.25.1:
 - JS: actieve tabs in petrol header/bottom bar in goud (leesbaarheid mobiel)
@@ -356,7 +361,7 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
 
     hass.bus.async_listen_once("homeassistant_started", _delayed)
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    _LOGGER.warning("BT: v1.25.1 klaar, brands API en inline logo overschreven")
+    _LOGGER.warning("BT: v1.25.2 klaar, brands API en inline logo overschreven")
     return True
 
 

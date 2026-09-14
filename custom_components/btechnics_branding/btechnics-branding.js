@@ -1,5 +1,9 @@
 /**
- * Btechnics IOT Branding v1.25.1
+ * Btechnics IOT Branding v1.25.2
+ *
+ * v1.25.2: brand map (icon.png, logo.png, dark_logo.png) toegevoegd zodat HA's
+ *          brands API het Btechnics icoon serveert voor deze integratie; HACS
+ *          update entiteit (CDN placeholder) krijgt het lokale icoon via JS.
  *
  * v1.25.1: actieve tabs in de petrol header/bottom bar in goud (waren petrol
  *          op petrol, onleesbaar op mobiel).
@@ -147,6 +151,7 @@ function patchSidebar() {
 
 // mdiHomeAssistant pad begint zo (src/resources/home-assistant-logo-svg.ts)
 const HA_PATH_PREFIX = "m12.151 1.5882";
+const OWN_BRAND_RE = /brands\.home-assistant\.io\/(_\/)?btechnics_branding\//;
 const HA_BRAND_RE = /(brands\.home-assistant\.io\/(_\/)?|\/api\/brands\/integration\/)(homeassistant|hassio|demo)\//;
 
 function swapSvgForIcon(host) {
@@ -185,6 +190,16 @@ function patchInlineLogos() {
     if (!img.dataset.bt && HA_BRAND_RE.test(img.getAttribute("src") || "")) {
       img.src = BT.icon;
       img.dataset.bt = "1";
+    }
+  });
+  // HACS update entiteit wijst naar brands.home-assistant.io/_/btechnics_branding
+  // (bestaat niet op de CDN -> "icon not available"); state-badge gebruikt
+  // een background-image, dus hier vervangen door het lokale icoon
+  deepQuery(document, "state-badge").forEach(el => {
+    const bg = el.style.backgroundImage || "";
+    if (!el.dataset.bt && OWN_BRAND_RE.test(bg)) {
+      el.style.backgroundImage = "url(" + BT.icon + ")";
+      el.dataset.bt = "1";
     }
   });
 }
