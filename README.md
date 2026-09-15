@@ -12,6 +12,8 @@ Instellingen > Apparaten en diensten > Btechnics IOT > Configureren:
 | Zoom desktop (%) | 80 |
 | Zoom mobiel (%) | 85 |
 | Grens mobiel/desktop (px) | 870 |
+| Klantenlogo (upload, naast het Btechnics logo in zijbalk, aanmeld- en opstartscherm) | geen |
+| Grootte klantenlogo (% van het Btechnics logo) | 100 |
 
 ## Installatie via HACS
 
