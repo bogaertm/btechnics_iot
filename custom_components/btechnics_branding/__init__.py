@@ -1,4 +1,10 @@
-"""Btechnics IOT Branding v1.27.0.
+"""Btechnics IOT Branding v1.28.0.
+
+v1.28.0:
+- Klantenlogo: upload via de opties (bestand wordt bewaard in
+  config/btechnics_branding/) en wordt naast het Btechnics logo getoond in
+  de zijbalk, op het aanmeldscherm en op het opstartscherm. Schaal instelbaar,
+  verwijderen via vinkje.
 
 v1.27.0:
 - Zoom instelbaar per desktop en mobiel (opties: zoom_desktop, zoom_mobile,
@@ -79,6 +85,23 @@ _LOGO_SVG_URL = "/btechnics_branding/logo.svg"
 _FAVICON_ICO_FILE = str(_DIR / "favicon.ico")
 
 _API_URL = "/api/btechnics_branding/config"
+_CUSTOMER_LOGO_URL = "/btechnics_branding/customer-logo"
+_CUSTOMER_LOGO_DIR = "btechnics_branding"
+
+
+def _customer_logo_path(hass, options):
+    """Pad naar het klantenlogo of None."""
+    name = options.get("customer_logo_file")
+    if not name or "/" in name or "\\" in name:
+        return None
+    path = pathlib.Path(hass.config.path(_CUSTOMER_LOGO_DIR)) / name
+    return path if path.is_file() else None
+
+
+def _entry_options(hass):
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        return entry.options
+    return {}
 
 _HIDE_CSS = (
     "<style id='bt-hide'>"
@@ -107,6 +130,30 @@ class BtechnicsBrandingJsView(HomeAssistantView):
         )
 
 
+class BtechnicsBrandingCustomerLogoView(HomeAssistantView):
+    """Serveert het geuploade klantenlogo (ook op het aanmeldscherm, dus zonder auth)."""
+
+    url = _CUSTOMER_LOGO_URL
+    name = "btechnics_branding:customer_logo"
+    requires_auth = False
+
+    def __init__(self, hass):
+        self.hass = hass
+
+    async def get(self, request):
+        path = _customer_logo_path(self.hass, _entry_options(self.hass))
+        if path is None:
+            return web.Response(status=404, text="Geen klantenlogo")
+        ctype = {
+            ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg", ".webp": "image/webp", ".gif": "image/gif",
+        }.get(path.suffix.lower(), "application/octet-stream")
+        return web.FileResponse(
+            str(path),
+            headers={"Cache-Control": "no-cache", "Content-Type": ctype},
+        )
+
+
 class BtechnicsBrandingConfigView(HomeAssistantView):
     url = _API_URL
     name = "api:btechnics_branding:config"
@@ -116,10 +163,14 @@ class BtechnicsBrandingConfigView(HomeAssistantView):
         self.hass = hass
 
     async def get(self, request):
-        config = {}
-        for entry in self.hass.config_entries.async_entries(DOMAIN):
-            config = entry.options
-            break
+        config = _entry_options(self.hass)
+        logo_path = _customer_logo_path(self.hass, config)
+        customer_logo = None
+        if logo_path is not None:
+            try:
+                customer_logo = f"{_CUSTOMER_LOGO_URL}?v={int(logo_path.stat().st_mtime)}"
+            except OSError:
+                customer_logo = _CUSTOMER_LOGO_URL
         return self.json({
             "login_text":        config.get("login_text", "Btechnics IOT"),
             "login_text_size":   config.get("login_text_size", 24),
@@ -128,6 +179,8 @@ class BtechnicsBrandingConfigView(HomeAssistantView):
             "zoom_desktop":      config.get("zoom_desktop", 80),
             "zoom_mobile":       config.get("zoom_mobile", 85),
             "zoom_breakpoint":   config.get("zoom_breakpoint", 870),
+            "customer_logo":     customer_logo,
+            "customer_logo_scale": config.get("customer_logo_scale", 100),
         })
 
 
@@ -358,6 +411,7 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
 
     hass.http.register_view(BtechnicsBrandingJsView())
     hass.http.register_view(BtechnicsBrandingConfigView(hass))
+    hass.http.register_view(BtechnicsBrandingCustomerLogoView(hass))
 
     try:
         frontend.add_extra_js_url(hass, _JS_URL)
@@ -375,7 +429,7 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
 
     hass.bus.async_listen_once("homeassistant_started", _delayed)
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    _LOGGER.warning("BT: v1.27.0 klaar, brands API en inline logo overschreven")
+    _LOGGER.warning("BT: v1.28.0 klaar, klantenlogo ondersteund")
     return True
 
 

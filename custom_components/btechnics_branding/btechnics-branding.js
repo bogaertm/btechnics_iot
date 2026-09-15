@@ -1,7 +1,7 @@
 /**
- * Btechnics IOT Branding v1.27.0
+ * Btechnics IOT Branding v1.28.0
  *
- * v1.27.0: zoom van de hele interface instelbaar per desktop en mobiel
+ * v1.28.0: zoom van de hele interface instelbaar per desktop en mobiel
  *          (opties zoom_desktop, zoom_mobile, zoom_breakpoint; standaard
  *          80 / 85 / 870 px). Gebruikt CSS zoom op <html>.
  *
@@ -45,6 +45,8 @@ const BT = {
   zoomDesktop: 80,
   zoomMobile: 85,
   zoomBreakpoint: 870,
+  customerLogo: null,   // URL van het geuploade klantenlogo (of null)
+  customerScale: 100,   // schaal in % t.o.v. het Btechnics logo
 };
 
 async function loadConfig() {
@@ -59,6 +61,8 @@ async function loadConfig() {
       if (d.zoom_desktop)    BT.zoomDesktop    = d.zoom_desktop;
       if (d.zoom_mobile)     BT.zoomMobile     = d.zoom_mobile;
       if (d.zoom_breakpoint) BT.zoomBreakpoint = d.zoom_breakpoint;
+      BT.customerLogo = d.customer_logo || null;
+      if (d.customer_logo_scale) BT.customerScale = d.customer_logo_scale;
     }
   } catch(e) {}
 }
@@ -117,21 +121,50 @@ function deepReplaceText(root, from, to) {
   } catch(e) {}
 }
 
+// Klantenlogo naast het Btechnics logo (zijbalk, aanmeldscherm, opstartscherm).
+// baseHeight = hoogte van het Btechnics logo op die plaats, in px.
+function ensureCustomerLogo(container, afterEl, cls, baseHeight, gap) {
+  if (!BT.customerLogo || !container) return;
+  let img = container.querySelector("." + cls);
+  if (!img) {
+    img = document.createElement("img");
+    img.className = cls;
+    img.alt = "";
+    if (afterEl && afterEl.parentNode === container) afterEl.after(img);
+    else container.appendChild(img);
+  }
+  const h = Math.round(baseHeight * BT.customerScale / 100);
+  img.style.cssText = "height:" + h + "px;width:auto;max-width:" + Math.round(h * 4) +
+    "px;display:block;flex-shrink:0;object-fit:contain;margin-left:" + gap + "px;";
+  if (img.getAttribute("src") !== BT.customerLogo) img.src = BT.customerLogo;
+}
+
 function patchLaunchScreen() {
   const screen = document.getElementById("ha-launch-screen");
-  if (!screen || screen.querySelector(".bt-logo")) return;
-  const img = document.createElement("img");
-  img.className = "bt-logo";
-  img.src = BT.logo;
-  img.style.cssText = "height:80px;width:auto;flex-shrink:0;";
-  const old = screen.querySelector("svg, img.ha-logo");
-  if (old) old.parentNode.insertBefore(img, old);
-  else screen.prepend(img);
+  if (!screen) return;
+  let img = screen.querySelector(".bt-logo");
+  if (!img) {
+    img = document.createElement("img");
+    img.className = "bt-logo";
+    img.src = BT.logo;
+    img.style.cssText = "height:80px;width:auto;flex-shrink:0;";
+    const old = screen.querySelector("svg, img.ha-logo");
+    if (old) old.parentNode.insertBefore(img, old);
+    else screen.prepend(img);
+  }
+  ensureCustomerLogo(img.parentNode, img, "bt-launch-customer-logo", 80, 24);
 }
 
 function patchLoginPage() {
   deepQuery(document, 'img[src*="favicon-192x192"], img[src*="favicon-512x512"], img[src*="favicon-384x384"]')
     .forEach(img => { if (!img.dataset.bt) { img.src = BT.icon; img.dataset.bt = "1"; } });
+
+  // Aanmeldscherm: <div class="header"><img></div> (authorize.html.template)
+  const loginHeader = document.querySelector(".content > .header");
+  if (loginHeader) {
+    const icon = loginHeader.querySelector("img:not(.bt-login-customer-logo)");
+    ensureCustomerLogo(loginHeader, icon, "bt-login-customer-logo", 56, 20);
+  }
 
   const haAuthEls = deepQuery(document, 'ha-authorize, ha-auth-flow, ha-auth');
   haAuthEls.forEach(haAuth => {
@@ -168,13 +201,15 @@ function patchSidebar() {
   for (const node of [...title.childNodes])
     if (node.nodeType === Node.TEXT_NODE) node.remove();
 
-  if (!sr.querySelector(".bt-sidebar-logo")) {
-    const logo = document.createElement("img");
+  let logo = sr.querySelector(".bt-sidebar-logo");
+  if (!logo) {
+    logo = document.createElement("img");
     logo.className = "bt-sidebar-logo";
     logo.src = BT.logo;
     logo.style.cssText = "height:26px;width:auto;display:block;flex-shrink:0;margin:0 4px 0 8px;";
     title.insertBefore(logo, title.firstChild);
   }
+  ensureCustomerLogo(title, logo, "bt-sidebar-customer-logo", 26, 8);
 
   let span = sr.querySelector(".bt-sidebar-text");
   if (!span) {

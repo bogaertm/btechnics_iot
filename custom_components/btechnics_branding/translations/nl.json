@@ -22,9 +22,16 @@
           "sidebar_text_size": "Tekstgrootte zijbalk (px)",
           "zoom_desktop": "Zoom desktop (%)",
           "zoom_mobile": "Zoom mobiel (%)",
-          "zoom_breakpoint": "Grens mobiel/desktop (px breedte)"
-        }
+          "zoom_breakpoint": "Grens mobiel/desktop (px breedte)",
+          "customer_logo": "Klantenlogo uploaden (png, jpg, svg, webp)",
+          "customer_logo_scale": "Grootte klantenlogo (% van het Btechnics logo)",
+          "remove_customer_logo": "Klantenlogo verwijderen"
+        },
+        "description": "Huidig klantenlogo: {customer_logo_status}"
       }
+    },
+    "error": {
+      "invalid_logo": "Bestand is geen geldige afbeelding (png, jpg, svg, webp of gif)."
     }
   }
 }

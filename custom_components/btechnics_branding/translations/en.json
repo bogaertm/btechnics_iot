@@ -22,9 +22,16 @@
           "sidebar_text_size": "Sidebar text size (px)",
           "zoom_desktop": "Zoom desktop (%)",
           "zoom_mobile": "Zoom mobile (%)",
-          "zoom_breakpoint": "Mobile/desktop breakpoint (px width)"
-        }
+          "zoom_breakpoint": "Mobile/desktop breakpoint (px width)",
+          "customer_logo": "Upload customer logo (png, jpg, svg, webp)",
+          "customer_logo_scale": "Customer logo size (% of the Btechnics logo)",
+          "remove_customer_logo": "Remove customer logo"
+        },
+        "description": "Current customer logo: {customer_logo_status}"
       }
+    },
+    "error": {
+      "invalid_logo": "File is not a valid image (png, jpg, svg, webp or gif)."
     }
   }
 }
