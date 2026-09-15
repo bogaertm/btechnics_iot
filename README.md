@@ -1,6 +1,6 @@
 # Btechnics IOT Features
 
-Voegt de **Btechnics IOT** huisstijl en extra functies toe aan je installatie: eigen logo en naam, Btechnics kleuren, instelbare zoom voor desktop en mobiel, en het verbergen van alle verwijzingen naar de standaard software.
+Voegt de **Btechnics IOT** huisstijl en extra functies toe aan je installatie: eigen logo en naam, Btechnics kleuren, instelbare zoom voor desktop en mobiel.
 
 ## Instellingen
 
