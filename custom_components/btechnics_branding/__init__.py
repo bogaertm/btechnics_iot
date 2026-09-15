@@ -1,4 +1,8 @@
-"""Btechnics IOT Branding v1.26.1.
+"""Btechnics IOT Branding v1.27.0.
+
+v1.27.0:
+- Zoom instelbaar per desktop en mobiel (opties: zoom_desktop, zoom_mobile,
+  zoom_breakpoint). Standaard 80% desktop, 85% mobiel, grens 870 px.
 
 v1.26.1:
 - JS: observer op shadow roots (dialogen/dropdowns direct gepatcht), help
@@ -121,6 +125,9 @@ class BtechnicsBrandingConfigView(HomeAssistantView):
             "login_text_size":   config.get("login_text_size", 24),
             "sidebar_text":      config.get("sidebar_text", "Btechnics IOT"),
             "sidebar_text_size": config.get("sidebar_text_size", 16),
+            "zoom_desktop":      config.get("zoom_desktop", 80),
+            "zoom_mobile":       config.get("zoom_mobile", 85),
+            "zoom_breakpoint":   config.get("zoom_breakpoint", 870),
         })
 
 
@@ -368,7 +375,7 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
 
     hass.bus.async_listen_once("homeassistant_started", _delayed)
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    _LOGGER.warning("BT: v1.26.1 klaar, brands API en inline logo overschreven")
+    _LOGGER.warning("BT: v1.27.0 klaar, brands API en inline logo overschreven")
     return True
 
 

@@ -19,7 +19,10 @@
           "login_text": "Login screen text",
           "login_text_size": "Login text size (px)",
           "sidebar_text": "Sidebar text",
-          "sidebar_text_size": "Sidebar text size (px)"
+          "sidebar_text_size": "Sidebar text size (px)",
+          "zoom_desktop": "Zoom desktop (%)",
+          "zoom_mobile": "Zoom mobile (%)",
+          "zoom_breakpoint": "Mobile/desktop breakpoint (px width)"
         }
       }
     }

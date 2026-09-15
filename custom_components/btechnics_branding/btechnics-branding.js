@@ -1,5 +1,9 @@
 /**
- * Btechnics IOT Branding v1.26.1
+ * Btechnics IOT Branding v1.27.0
+ *
+ * v1.27.0: zoom van de hele interface instelbaar per desktop en mobiel
+ *          (opties zoom_desktop, zoom_mobile, zoom_breakpoint; standaard
+ *          80 / 85 / 870 px). Gebruikt CSS zoom op <html>.
  *
  * v1.26.1: MutationObserver op elke shadow root (dialogen, dropdowns) zodat
  *          tekst en links meteen gepatcht worden i.p.v. pas na 2 s. Elementen
@@ -38,6 +42,9 @@ const BT = {
   loginSize: 24,
   sidebarText: BRAND,
   sidebarSize: 16,
+  zoomDesktop: 80,
+  zoomMobile: 85,
+  zoomBreakpoint: 870,
 };
 
 async function loadConfig() {
@@ -49,6 +56,9 @@ async function loadConfig() {
       BT.loginSize   = d.login_text_size   || BT.loginSize;
       BT.sidebarText = d.sidebar_text      || BT.sidebarText;
       BT.sidebarSize = d.sidebar_text_size || BT.sidebarSize;
+      if (d.zoom_desktop)    BT.zoomDesktop    = d.zoom_desktop;
+      if (d.zoom_mobile)     BT.zoomMobile     = d.zoom_mobile;
+      if (d.zoom_breakpoint) BT.zoomBreakpoint = d.zoom_breakpoint;
     }
   } catch(e) {}
 }
@@ -299,6 +309,16 @@ function patchColors() {
   }
 }
 
+// Zoom van de hele interface, apart voor mobiel en desktop (instelbaar in opties)
+function applyZoom() {
+  try {
+    const pct = window.innerWidth < BT.zoomBreakpoint ? BT.zoomMobile : BT.zoomDesktop;
+    const z = pct === 100 ? "" : String(pct / 100);
+    if (document.documentElement.style.zoom !== z) document.documentElement.style.zoom = z;
+  } catch(e) {}
+}
+window.addEventListener("resize", applyZoom);
+
 function patchTitle() {
   if (document.title.includes("Home Assistant"))
     document.title = document.title.replace(/Home Assistant/g, BRAND);
@@ -330,6 +350,7 @@ function patchAllInner() {
 
 (async () => {
   await loadConfig();
+  applyZoom();
   patchColors();
   patchLaunchScreen();
   patchTitle();

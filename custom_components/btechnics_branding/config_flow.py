@@ -8,6 +8,9 @@ DEFAULT_LOGIN_TEXT = "Btechnics IOT"
 DEFAULT_SIDEBAR_TEXT = "Btechnics IOT"
 DEFAULT_LOGIN_SIZE = 24
 DEFAULT_SIDEBAR_SIZE = 16
+DEFAULT_ZOOM_DESKTOP = 80
+DEFAULT_ZOOM_MOBILE = 85
+DEFAULT_ZOOM_BREAKPOINT = 870
 
 
 class BtechnicsBrandingConfigFlow(config_entries.ConfigFlow, domain=DOMAIN):
@@ -53,5 +56,11 @@ class BtechnicsBrandingOptionsFlow(config_entries.OptionsFlow):
                     default=current.get("sidebar_text", DEFAULT_SIDEBAR_TEXT)): str,
                 vol.Optional("sidebar_text_size",
                     default=current.get("sidebar_text_size", DEFAULT_SIDEBAR_SIZE)): int,
+                vol.Optional("zoom_desktop",
+                    default=current.get("zoom_desktop", DEFAULT_ZOOM_DESKTOP)): vol.All(int, vol.Range(min=50, max=150)),
+                vol.Optional("zoom_mobile",
+                    default=current.get("zoom_mobile", DEFAULT_ZOOM_MOBILE)): vol.All(int, vol.Range(min=50, max=150)),
+                vol.Optional("zoom_breakpoint",
+                    default=current.get("zoom_breakpoint", DEFAULT_ZOOM_BREAKPOINT)): vol.All(int, vol.Range(min=300, max=2000)),
             }),
         )
