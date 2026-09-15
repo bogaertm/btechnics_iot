@@ -1,5 +1,10 @@
 /**
- * Btechnics IOT Branding v1.26.0
+ * Btechnics IOT Branding v1.26.1
+ *
+ * v1.26.1: MutationObserver op elke shadow root (dialogen, dropdowns) zodat
+ *          tekst en links meteen gepatcht worden i.p.v. pas na 2 s. Elementen
+ *          met href naar home-assistant.io die geen <a> zijn (ha-icon-button
+ *          help knop) worden verborgen.
  *
  * v1.26.0: sidebar en header terug licht zoals origineel HA. Petrol enkel als
  *          primaire kleur (knoppen, links, actieve iconen, toggles, lichte
@@ -56,12 +61,30 @@ style.textContent = `
 `;
 document.head.appendChild(style);
 
+// Mutaties binnen shadow roots zijn onzichtbaar voor een observer op document;
+// daarom observeren we elke shadow root die we tegenkomen (eenmalig).
+const observedRoots = new WeakSet();
+let patching = false;
+let patchTimer = null;
+function schedulePatch() {
+  if (patching || patchTimer) return;
+  patchTimer = setTimeout(() => { patchTimer = null; patchAll(); }, 60);
+}
+function observeRoot(root) {
+  if (observedRoots.has(root)) return;
+  observedRoots.add(root);
+  try {
+    new MutationObserver(schedulePatch)
+      .observe(root, { childList: true, subtree: true, characterData: true });
+  } catch(e) {}
+}
+
 function deepQuery(root, selector) {
   const found = [];
   try {
     found.push(...root.querySelectorAll(selector));
     for (const el of root.querySelectorAll('*')) {
-      if (el.shadowRoot) found.push(...deepQuery(el.shadowRoot, selector));
+      if (el.shadowRoot) { observeRoot(el.shadowRoot); found.push(...deepQuery(el.shadowRoot, selector)); }
     }
   } catch(e) {}
   return found;
@@ -218,11 +241,12 @@ function patchExternalLinks() {
   deepQuery(document, "ha-card.ohf").forEach(c => { c.style.display = "none"; });
   // "Tip!" balk onderaan Instellingen (forums, socials, blog, nieuwsbrief, sneltoetsen)
   deepQuery(document, "ha-tip").forEach(c => { c.style.display = "none"; });
-  deepQuery(document, "a[href]").forEach(a => {
+  // ook ha-icon-button / ha-button met href (bv. het ? help icoon in dialogen)
+  deepQuery(document, "[href]").forEach(a => {
     const href = a.getAttribute("href") || "";
     if (!EXT_HA_RE.test(href) || a.dataset.bt) return;
     a.dataset.bt = "1";
-    if (EXT_HIDE_RE.test(href)) {
+    if (EXT_HIDE_RE.test(href) || a.tagName !== "A") {
       // release notes, community, OHF: link volledig verbergen (rij erboven mee)
       const row = a.closest(".row") || a;
       row.style.display = "none";
@@ -288,6 +312,11 @@ function patchFavicon() {
 }
 
 function patchAll() {
+  patching = true;
+  try { patchAllInner(); } finally { patching = false; }
+}
+
+function patchAllInner() {
   patchLaunchScreen();
   patchLoginPage();
   patchSidebar();
@@ -305,8 +334,8 @@ function patchAll() {
   patchLaunchScreen();
   patchTitle();
   patchFavicon();
-  new MutationObserver(patchAll)
-    .observe(document.documentElement, { childList: true, subtree: true });
+  new MutationObserver(schedulePatch)
+    .observe(document.documentElement, { childList: true, subtree: true, characterData: true });
   window.addEventListener("load", () => {
     patchAll();
     setInterval(patchAll, 2000);
