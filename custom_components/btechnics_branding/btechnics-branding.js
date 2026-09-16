@@ -1,7 +1,7 @@
 /**
- * Btechnics IOT Branding v1.28.0
+ * Btechnics IOT Branding v1.28.1
  *
- * v1.28.0: zoom van de hele interface instelbaar per desktop en mobiel
+ * v1.28.1: zoom van de hele interface instelbaar per desktop en mobiel
  *          (opties zoom_desktop, zoom_mobile, zoom_breakpoint; standaard
  *          80 / 85 / 870 px). Gebruikt CSS zoom op <html>.
  *
@@ -134,8 +134,8 @@ function ensureCustomerLogo(container, afterEl, cls, baseHeight, gap) {
     else container.appendChild(img);
   }
   const h = Math.round(baseHeight * BT.customerScale / 100);
-  img.style.cssText = "height:" + h + "px;width:auto;max-width:" + Math.round(h * 4) +
-    "px;display:block;flex-shrink:0;object-fit:contain;margin-left:" + gap + "px;";
+  img.style.cssText = "height:" + h + "px;width:auto;max-width:" + Math.round(h * 3) +
+    "px;display:block;flex-shrink:1;min-width:0;object-fit:contain;margin-left:" + gap + "px;";
   if (img.getAttribute("src") !== BT.customerLogo) img.src = BT.customerLogo;
 }
 
@@ -201,24 +201,61 @@ function patchSidebar() {
   for (const node of [...title.childNodes])
     if (node.nodeType === Node.TEXT_NODE) node.remove();
 
+  // v1.28.1: de zijbalkkop is twee rijen. Rij 1 is een vaste logoregel (LOGO_H px hoog) met het
+  // Btechnics logo en, als het er is, het klantenlogo ernaast. Beide worden op die hoogte
+  // geschaald, breedte automatisch, met een maximale breedte zodat een breed klantenlogo de
+  // regel nooit breekt. Rij 2 is de tekst, op een regel met afkapping. Zo kan geen enkel logo
+  // de tekst uit de kop duwen, wat er sinds v1.28.1 gebeurde (.title is geen flex container).
+  const LOGO_H = 28;
+  title.style.cssText = "display:flex;flex-direction:column;justify-content:center;gap:3px;" +
+    "overflow:hidden;line-height:1.2;padding-left:8px;box-sizing:border-box;";
+
+  let rij = sr.querySelector(".bt-logos");
+  if (!rij) {
+    rij = document.createElement("div");
+    rij.className = "bt-logos";
+    title.insertBefore(rij, title.firstChild);
+  }
+  rij.style.cssText = "display:flex;align-items:center;gap:10px;height:" + LOGO_H + "px;" +
+    "max-width:100%;overflow:hidden;flex-shrink:0;";
+
   let logo = sr.querySelector(".bt-sidebar-logo");
   if (!logo) {
     logo = document.createElement("img");
     logo.className = "bt-sidebar-logo";
     logo.src = BT.logo;
-    logo.style.cssText = "height:26px;width:auto;display:block;flex-shrink:0;margin:0 4px 0 8px;";
-    title.insertBefore(logo, title.firstChild);
+    logo.alt = "";
   }
-  ensureCustomerLogo(title, logo, "bt-sidebar-customer-logo", 26, 8);
+  logo.style.cssText = "height:" + LOGO_H + "px;width:auto;max-width:60%;object-fit:contain;" +
+    "object-position:left center;display:block;flex-shrink:1;min-width:0;";
+  if (logo.parentNode !== rij) rij.appendChild(logo);
+
+  let klant = sr.querySelector(".bt-sidebar-customer-logo");
+  if (BT.customerLogo) {
+    if (!klant) {
+      klant = document.createElement("img");
+      klant.className = "bt-sidebar-customer-logo";
+      klant.alt = "";
+    }
+    // Schaal enkel naar beneden in de zijbalk: hoger dan de logoregel kan nooit.
+    const h = Math.round(LOGO_H * Math.min(BT.customerScale, 100) / 100);
+    klant.style.cssText = "height:" + h + "px;width:auto;max-width:40%;object-fit:contain;" +
+      "object-position:left center;display:block;flex-shrink:1;min-width:0;";
+    if (klant.getAttribute("src") !== BT.customerLogo) klant.src = BT.customerLogo;
+    if (klant.parentNode !== rij) rij.appendChild(klant);
+  } else if (klant) {
+    klant.remove();
+  }
 
   let span = sr.querySelector(".bt-sidebar-text");
   if (!span) {
     span = document.createElement("span");
     span.className = "bt-sidebar-text";
-    title.appendChild(span);
   }
   span.textContent = BT.sidebarText;
-  span.style.fontSize = BT.sidebarSize + "px";
+  span.style.cssText = "display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" +
+    "font-size:" + BT.sidebarSize + "px;";
+  if (span.parentNode !== title) title.appendChild(span);
 }
 
 // mdiHomeAssistant pad begint zo (src/resources/home-assistant-logo-svg.ts)

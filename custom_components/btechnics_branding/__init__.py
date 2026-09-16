@@ -1,4 +1,8 @@
-"""Btechnics IOT Branding v1.28.0.
+"""Btechnics IOT Branding v1.28.1.
+
+v1.28.1:
+- Zijbalk: vaste logoregel (Btechnics en klantenlogo naast elkaar, automatisch op
+  hoogte geschaald, tekst eronder op één regel). Logo's kunnen de kop niet meer breken.
 
 v1.28.0:
 - Klantenlogo: upload via de opties (bestand wordt bewaard in
@@ -429,7 +433,7 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
 
     hass.bus.async_listen_once("homeassistant_started", _delayed)
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    _LOGGER.warning("BT: v1.28.0 klaar, klantenlogo ondersteund")
+    _LOGGER.warning("BT: v1.28.1 klaar, klantenlogo ondersteund")
     return True
 
 
