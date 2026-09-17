@@ -1,7 +1,7 @@
 /**
- * Btechnics IOT Branding v1.28.1
+ * Btechnics IOT Branding v1.28.2
  *
- * v1.28.1: zoom van de hele interface instelbaar per desktop en mobiel
+ * v1.28.2: zoom van de hele interface instelbaar per desktop en mobiel
  *          (opties zoom_desktop, zoom_mobile, zoom_breakpoint; standaard
  *          80 / 85 / 870 px). Gebruikt CSS zoom op <html>.
  *
@@ -201,11 +201,11 @@ function patchSidebar() {
   for (const node of [...title.childNodes])
     if (node.nodeType === Node.TEXT_NODE) node.remove();
 
-  // v1.28.1: de zijbalkkop is twee rijen. Rij 1 is een vaste logoregel (LOGO_H px hoog) met het
+  // v1.28.2: de zijbalkkop is twee rijen. Rij 1 is een vaste logoregel (LOGO_H px hoog) met het
   // Btechnics logo en, als het er is, het klantenlogo ernaast. Beide worden op die hoogte
   // geschaald, breedte automatisch, met een maximale breedte zodat een breed klantenlogo de
   // regel nooit breekt. Rij 2 is de tekst, op een regel met afkapping. Zo kan geen enkel logo
-  // de tekst uit de kop duwen, wat er sinds v1.28.1 gebeurde (.title is geen flex container).
+  // de tekst uit de kop duwen, wat er sinds v1.28.2 gebeurde (.title is geen flex container).
   const LOGO_H = 28;
   title.style.cssText = "display:flex;flex-direction:column;justify-content:center;gap:3px;" +
     "overflow:hidden;line-height:1.2;padding-left:8px;box-sizing:border-box;";
@@ -382,8 +382,25 @@ function patchColors() {
 }
 
 // Zoom van de hele interface, apart voor mobiel en desktop (instelbaar in opties)
+// v1.28.2: GEEN zoom in de companion app (iOS en Android). De app draait de frontend in een
+// webview en zet zelf de schaal; CSS zoom op <html> daarbovenop brak de app. De app is te
+// herkennen aan zijn user agent ("Home Assistant/..." , zie mobile-apps docs) en aan de bruggen
+// die hij in window zet: externalApp (Android) en webkit.messageHandlers.externalBus (iOS).
+function isCompanionApp() {
+  try {
+    if (/Home ?Assistant\//i.test(navigator.userAgent || "")) return true;
+    if (window.externalApp) return true;
+    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.externalBus) return true;
+  } catch(e) {}
+  return false;
+}
+
 function applyZoom() {
   try {
+    if (isCompanionApp()) {
+      if (document.documentElement.style.zoom) document.documentElement.style.zoom = "";
+      return;
+    }
     const pct = window.innerWidth < BT.zoomBreakpoint ? BT.zoomMobile : BT.zoomDesktop;
     const z = pct === 100 ? "" : String(pct / 100);
     if (document.documentElement.style.zoom !== z) document.documentElement.style.zoom = z;

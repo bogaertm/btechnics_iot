@@ -1,4 +1,8 @@
-"""Btechnics IOT Branding v1.28.1.
+"""Btechnics IOT Branding v1.28.2.
+
+v1.28.2:
+- Zoom wordt niet meer toegepast in de companion app (iOS/Android); de app zet
+  zelf zijn schaal en brak op de CSS zoom.
 
 v1.28.1:
 - Zijbalk: vaste logoregel (Btechnics en klantenlogo naast elkaar, automatisch op
@@ -433,7 +437,7 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
 
     hass.bus.async_listen_once("homeassistant_started", _delayed)
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    _LOGGER.warning("BT: v1.28.1 klaar, klantenlogo ondersteund")
+    _LOGGER.warning("BT: v1.28.2 klaar, klantenlogo ondersteund")
     return True
 
 
