@@ -1,5 +1,5 @@
 /**
- * Btechnics IOT Branding v1.29.0
+ * Btechnics IOT Branding v1.29.1
  *
  * v1.28.2: zoom van de hele interface instelbaar per desktop en mobiel
  *          (opties zoom_desktop, zoom_mobile, zoom_breakpoint; standaard
@@ -80,9 +80,13 @@ document.head.appendChild(style);
 const observedRoots = new WeakSet();
 let patching = false;
 let patchTimer = null;
+// v1.29.1: hoogstens een patchronde per 300 ms. Een dashboard met sensoren die elke
+// seconde wijzigen gaf anders een volledige ronde door de hele pagina bij elke waarde.
+let lastPatch = 0;
 function schedulePatch() {
   if (patching || patchTimer) return;
-  patchTimer = setTimeout(() => { patchTimer = null; patchAll(); }, 60);
+  const wacht = Math.max(60, 300 - (Date.now() - lastPatch));
+  patchTimer = setTimeout(() => { patchTimer = null; patchAll(); }, wacht);
 }
 function observeRoot(root) {
   if (observedRoots.has(root)) return;
@@ -104,6 +108,8 @@ function deepQuery(root, selector) {
   return found;
 }
 
+const EDITABLE_SEL = ".cm-editor, .cm-content, [contenteditable=\"\"], [contenteditable=\"true\"], textarea, input, pre, code";
+
 function deepReplaceText(root, from, to) {
   try {
     const escaped = from.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -111,6 +117,10 @@ function deepReplaceText(root, from, to) {
     const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
     let node;
     while ((node = walker.nextNode())) {
+      // v1.29.1: nooit in bewerkbare tekst. De code editor (CodeMirror) leest een
+      // wijziging in zijn DOM terug als invoer, dus "Home Assistant" in YAML of een
+      // template zou echt aangepast en mee opgeslagen worden.
+      if (node.parentElement && node.parentElement.closest(EDITABLE_SEL)) continue;
       if (node.textContent.includes(from)) {
         node.textContent = node.textContent.replace(re, to);
       }
@@ -253,7 +263,9 @@ function patchSidebar() {
     span = document.createElement("span");
     span.className = "bt-sidebar-text";
   }
-  span.textContent = BT.sidebarText;
+  // Enkel schrijven als het verschilt: textContent zetten vervangt de tekstnode, dat is
+  // een mutatie, en die startte een nieuwe patchronde (eindeloze lus, ~13 per seconde).
+  if (span.textContent !== BT.sidebarText) span.textContent = BT.sidebarText;
   span.style.cssText = "display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" +
     "font-size:" + BT.sidebarSize + "px;";
   if (span.parentNode !== title) title.appendChild(span);
@@ -324,8 +336,8 @@ function patchInlineLogos() {
 }
 
 // Externe HA / Open Home Foundation verwijzingen
-const EXT_HIDE_RE  = /ohf\.to|openhomefoundation\.org|community\.home-assistant\.io|release-notes|\/blog\//;
-const EXT_HA_RE    = /home-assistant\.io|openhomefoundation\.org|ohf\.to/;
+const EXT_HIDE_RE  = /nabucasa\.com|ohf\.to|openhomefoundation\.org|community\.home-assistant\.io|release-notes|\/blog\//;
+const EXT_HA_RE    = /home-assistant\.io|openhomefoundation\.org|ohf\.to|nabucasa\.com/;
 const BT_SITE      = "https://btechnics.be";
 
 function patchExternalLinks() {
@@ -336,8 +348,10 @@ function patchExternalLinks() {
   // ook ha-icon-button / ha-button met href (bv. het ? help icoon in dialogen)
   deepQuery(document, "[href]").forEach(a => {
     const href = a.getAttribute("href") || "";
-    if (!EXT_HA_RE.test(href) || a.dataset.bt) return;
-    a.dataset.bt = "1";
+    // v1.29.1: geen "al gedaan" vlag meer. De frontend hergebruikt elementen en zet
+    // de href terug (gemeten op de hassio integratiepagina); zolang de href nog naar
+    // HA wijst, pakken we hem opnieuw aan. Na de aanpassing matcht hij niet meer.
+    if (!EXT_HA_RE.test(href)) return;
     if (EXT_HIDE_RE.test(href) || a.tagName !== "A") {
       // release notes, community, OHF: link volledig verbergen (rij erboven mee)
       const row = a.closest(".row") || a;
@@ -431,12 +445,31 @@ function patchFavicon() {
 }
 
 function patchAll() {
+  lastPatch = Date.now();
   patching = true;
   try { patchAllInner(); } finally { patching = false; }
 }
 
+// v1.29.1: HOME ASSISTANT CLOUD (NABU CASA) VERBERGEN.
+// Door de naamvervanging stond er "Btechnics IOT Cloud is een abonnementsdienst met
+// een gratis proefperiode", alsof het een dienst van Btechnics is. Het menu-item in
+// Instellingen, de promokaart bij Spraakassistenten en de cloud pagina's gaan weg.
+function patchCloud() {
+  deepQuery(document, 'a[href="/config/cloud"], a[href^="/config/cloud/"]').forEach(a => {
+    const host = a.getRootNode()?.host;
+    const item = host && host.tagName && host.tagName.toLowerCase().startsWith("ha-list-item") ? host : a;
+    if (item.style.display !== "none") item.style.display = "none";
+  });
+  deepQuery(document, "cloud-discover").forEach(c => { if (c.style.display !== "none") c.style.display = "none"; });
+  if (location.pathname.startsWith("/config/cloud")) {
+    history.replaceState(null, "", "/config/dashboard");
+    window.dispatchEvent(new CustomEvent("location-changed"));
+  }
+}
+
 function patchAllInner() {
   disableSurvey();
+  patchCloud();
   patchLaunchScreen();
   patchLoginPage();
   patchSidebar();

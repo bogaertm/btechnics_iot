@@ -1,4 +1,14 @@
-"""Btechnics IOT Branding v1.29.0.
+"""Btechnics IOT Branding v1.29.1.
+
+v1.29.1 (audit):
+- HTML routes werden bij elke start twee keer ingepakt (bij setup en bij
+  homeassistant_started); nu met merkteken, dus maar een keer.
+- authorize.html wordt niet meer in de event loop van schijf gelezen maar in
+  een executor.
+- Logboek: de meldingen per paginabezoek staan nu op debug in plaats van
+  warning, zodat het HA logboek niet volloopt.
+- Brands: logo afbeeldingen (logo.png, dark_logo.png) krijgen het brede
+  Btechnics logo in plaats van het vierkante icoon.
 
 v1.29.0:
 - Enquete (onboarding survey) van HA volledig uit: bij elke start wordt in de
@@ -78,6 +88,7 @@ v1.23.0:
 v1.22.0:
 - FileResponse content_type fix voor de auth pagina
 """
+import asyncio
 import json
 import logging
 import pathlib
@@ -104,9 +115,21 @@ _ICON_192_URL = "/btechnics_branding/app-icon-192.png"
 _LOGO_SVG_FILE = str(_DIR / "logo.svg")
 _LOGO_SVG_URL = "/btechnics_branding/logo.svg"
 _FAVICON_ICO_FILE = str(_DIR / "favicon.ico")
+_BRAND_LOGO_FILE = str(_DIR / "brand" / "logo.png")
+_BRAND_DARK_LOGO_FILE = str(_DIR / "brand" / "dark_logo.png")
 
 _API_URL = "/api/btechnics_branding/config"
 _LAUNCH_LOGO_HA = "/static/images/home-assistant-logo-loading.svg"
+_BT_PETROL = "#00222b"
+_HA_THEME_COLOR = "#2980b9"
+_HTML_REPLACE = (
+    ("<title>Home Assistant</title>", "<title>Btechnics IOT</title>"),
+    ('content="Home Assistant"', 'content="Btechnics IOT"'),
+    ('alt="Home Assistant"', 'alt="Btechnics IOT"'),
+    ("Could not load Home Assistant", "Could not load Btechnics IOT"),
+    ('color="#18bcf2"', 'color="#ed6928"'),
+    (f'content="{_HA_THEME_COLOR}"', f'content="{_BT_PETROL}"'),
+)
 _CUSTOMER_LOGO_URL = "/btechnics_branding/customer-logo"
 _CUSTOMER_LOGO_DIR = "btechnics_branding"
 
@@ -173,7 +196,14 @@ class BtechnicsBrandingCustomerLogoView(HomeAssistantView):
         }.get(path.suffix.lower(), "application/octet-stream")
         return web.FileResponse(
             str(path),
-            headers={"Cache-Control": "no-cache", "Content-Type": ctype},
+            headers={
+                "Cache-Control": "no-cache",
+                "Content-Type": ctype,
+                # Een geupload SVG mag geen script uitvoeren als iemand de URL
+                # rechtstreeks opent (zelfde domein als HA).
+                "Content-Security-Policy": "default-src 'none'; style-src 'unsafe-inline'; img-src data:",
+                "X-Content-Type-Options": "nosniff",
+            },
         )
 
 
@@ -207,7 +237,7 @@ class BtechnicsBrandingConfigView(HomeAssistantView):
         })
 
 
-def _patch_response(response, request_path: str):
+def _patch_response(response, request_path: str, file_text: str | None = None):
     """
     Patcheer een HTML response.
     Werkt zowel voor web.Response (content_type ingesteld)
@@ -215,18 +245,12 @@ def _patch_response(response, request_path: str):
     """
     text = None
 
-    # Geval 1 FileResponse, lees van _path
+    # Geval 1 FileResponse: de handler las het bestand al in een executor
     file_path = getattr(response, "_path", None)
     if file_path:
-        p = pathlib.Path(str(file_path))
-        if p.suffix.lower() not in (".html", ".htm"):
+        if file_text is None:
             return None
-        try:
-            text = p.read_text("utf-8")
-            _LOGGER.warning("BT: FileResponse gelezen: %s (pad: %s)", request_path, p)
-        except Exception as e:
-            _LOGGER.warning("BT: FileResponse leesfout %s: %s", p, e)
-            return None
+        text = file_text
 
     # Geval 2 gewone Response, check content_type
     else:
@@ -240,7 +264,7 @@ def _patch_response(response, request_path: str):
                 break
 
     if not text or "<head>" not in text:
-        _LOGGER.warning("BT: geen bruikbare HTML tekst voor %s", request_path)
+        _LOGGER.debug("BT: geen bruikbare HTML tekst voor %s", request_path)
         return None
 
     if "bt-hide" in text:
@@ -251,7 +275,12 @@ def _patch_response(response, request_path: str):
     patched = text.replace("<head>", "<head>" + inject, 1)
     # Opstartscherm: HA logo meteen in de HTML vervangen (geen flits voor de JS er is)
     patched = patched.replace(_LAUNCH_LOGO_HA, _LOGO_SVG_URL)
-    _LOGGER.warning("BT: HTML gepatcht voor %s (auth=%s)", request_path, is_auth)
+    # v1.29.1: naam en kleuren die al in de HTML staan, voor de JS geladen is.
+    # apple-mobile-web-app-title is de naam onder het icoon bij "Zet op
+    # beginscherm" op iPhone; application-name idem op Android/Windows.
+    for old, new in _HTML_REPLACE:
+        patched = patched.replace(old, new)
+    _LOGGER.debug("BT: HTML gepatcht voor %s (auth=%s)", request_path, is_auth)
     return web.Response(
         text=patched,
         status=response.status,
@@ -263,8 +292,19 @@ def _patch_response(response, request_path: str):
 def _make_html_handler(original):
     async def handler(request):
         response = await original(request)
-        patched = _patch_response(response, request.path)
+        text = None
+        file_path = getattr(response, "_path", None)
+        if file_path and str(file_path).lower().endswith((".html", ".htm")):
+            try:
+                text = await asyncio.get_running_loop().run_in_executor(
+                    None, pathlib.Path(str(file_path)).read_text, "utf-8"
+                )
+            except OSError as err:
+                _LOGGER.debug("BT: leesfout %s: %s", file_path, err)
+                return response
+        patched = _patch_response(response, request.path, text)
         return patched if patched is not None else response
+    handler._bt_html_patched = True  # type: ignore[attr-defined]
     return handler
 
 
@@ -277,6 +317,8 @@ def _make_manifest_handler(original):
                 m = json.loads(raw.decode("utf-8"))
                 m["name"] = "Btechnics IOT"
                 m["short_name"] = "Btechnics IOT"
+                if str(m.get("theme_color", "")).lower() == _HA_THEME_COLOR:
+                    m["theme_color"] = _BT_PETROL
                 m["icons"] = [
                     {
                         "src": _ICON_192_URL,
@@ -298,6 +340,7 @@ def _make_manifest_handler(original):
         except Exception as e:
             _LOGGER.warning("BT manifest fout: %s", e)
         return response
+    handler._bt_html_patched = True  # type: ignore[attr-defined]
     return handler
 
 
@@ -321,7 +364,10 @@ def _make_brands_handler(original):
         domain = request.match_info.get("domain", "")
         image = request.match_info.get("image", "")
         if domain in _BRANDS_DOMAINS:
-            path = _ICON_512_FILE if "@2x" in image or "logo" in image else _ICON_192_FILE
+            if "logo" in image:
+                path = _BRAND_DARK_LOGO_FILE if image.startswith("dark_") else _BRAND_LOGO_FILE
+            else:
+                path = _ICON_512_FILE if "@2x" in image else _ICON_192_FILE
             return web.FileResponse(
                 path,
                 headers={"Cache-Control": "public, max-age=86400"},
@@ -343,7 +389,7 @@ def _patch_brands_route(app: web.Application) -> None:
                 continue
             try:
                 route._handler = _make_brands_handler(route._handler)
-                _LOGGER.warning("BT: brands route gepatcht (%s)", _BRANDS_DOMAINS)
+                _LOGGER.info("BT: brands route gepatcht (%s)", _BRANDS_DOMAINS)
             except Exception as e:
                 _LOGGER.warning("BT brands patch fout: %s", e)
 
@@ -405,7 +451,7 @@ def _patch_static_route(app: web.Application) -> None:
                 continue
             try:
                 route._handler = _make_static_handler(route._handler)
-                _LOGGER.warning("BT: static route gepatcht (%s)", canonical)
+                _LOGGER.info("BT: static route gepatcht (%s)", canonical)
             except Exception as e:
                 _LOGGER.warning("BT static patch fout: %s", e)
 
@@ -428,6 +474,8 @@ def _patch_routes(app: web.Application) -> None:
         for route in resource:
             if route.method not in ("GET", "*", "HEAD"):
                 continue
+            if getattr(route._handler, "_bt_html_patched", False):
+                continue
             try:
                 if canonical == "/manifest.json":
                     route._handler = _make_manifest_handler(route._handler)
@@ -437,7 +485,8 @@ def _patch_routes(app: web.Application) -> None:
                     patched.append(canonical[:25])
             except Exception as e:
                 _LOGGER.warning("BT patch fout %s: %s", canonical, e)
-    _LOGGER.warning("BT: %d routes gepatcht: %s", len(patched), patched[:12])
+    if patched:
+        _LOGGER.debug("BT: %d routes gepatcht: %s", len(patched), patched[:12])
 
 
 async def _disable_onboarding_survey(hass: HomeAssistant) -> None:
@@ -463,7 +512,7 @@ async def _disable_onboarding_survey(hass: HomeAssistant) -> None:
         }
         core["surveys"] = surveys
         await store.async_set_item("core", core)
-        _LOGGER.warning("BT: HA enquete uitgeschakeld")
+        _LOGGER.info("BT: HA enquete uitgeschakeld")
     except Exception as err:  # noqa: BLE001
         _LOGGER.warning("BT: enquete uitschakelen mislukt: %s", err)
 
@@ -505,7 +554,7 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
 
     hass.bus.async_listen_once("homeassistant_started", _delayed)
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    _LOGGER.warning("BT: v1.29.0 klaar, klantenlogo ondersteund")
+    _LOGGER.info("BT: v1.29.1 klaar")
     return True
 
 
