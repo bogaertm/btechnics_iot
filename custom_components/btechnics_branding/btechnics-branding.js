@@ -1,5 +1,5 @@
 /**
- * Btechnics IOT Branding v1.28.2
+ * Btechnics IOT Branding v1.29.0
  *
  * v1.28.2: zoom van de hele interface instelbaar per desktop en mobiel
  *          (opties zoom_desktop, zoom_mobile, zoom_breakpoint; standaard
@@ -69,8 +69,8 @@ async function loadConfig() {
 
 const style = document.createElement("style");
 style.textContent = `
-  #ha-launch-screen svg,
-  #ha-launch-screen img.ha-logo { display: none !important; }
+  #ha-launch-screen svg         { display: none !important; }
+  #ha-launch-screen img.ha-logo { width: auto !important; height: 80px !important; }
   .ohf-logo                     { display: none !important; }
 `;
 document.head.appendChild(style);
@@ -142,16 +142,17 @@ function ensureCustomerLogo(container, afterEl, cls, baseHeight, gap) {
 function patchLaunchScreen() {
   const screen = document.getElementById("ha-launch-screen");
   if (!screen) return;
-  let img = screen.querySelector(".bt-logo");
+  // v1.29.0: de server zet het Btechnics logo al in <img class="ha-logo">. Komt de
+  // HTML nog uit een oude cache van de service worker, dan zetten we het hier.
+  let img = screen.querySelector("img.ha-logo") || screen.querySelector(".bt-logo");
   if (!img) {
     img = document.createElement("img");
     img.className = "bt-logo";
-    img.src = BT.logo;
-    img.style.cssText = "height:80px;width:auto;flex-shrink:0;";
-    const old = screen.querySelector("svg, img.ha-logo");
-    if (old) old.parentNode.insertBefore(img, old);
-    else screen.prepend(img);
+    screen.prepend(img);
   }
+  if (img.getAttribute("src") !== BT.logo) img.src = BT.logo;
+  img.alt = "";
+  img.style.cssText = "height:80px;width:auto;flex-shrink:0;display:block;";
   ensureCustomerLogo(img.parentNode, img, "bt-launch-customer-logo", 80, 24);
 }
 
@@ -261,13 +262,22 @@ function patchSidebar() {
 // mdiHomeAssistant pad begint zo (src/resources/home-assistant-logo-svg.ts)
 const HA_PATH_PREFIX = "m12.151 1.5882";
 const OWN_BRAND_RE = /brands\.home-assistant\.io\/(_\/)?btechnics_branding\//;
-const HA_BRAND_RE = /(brands\.home-assistant\.io\/(_\/)?|\/api\/brands\/integration\/)(homeassistant|hassio|demo)\//;
+const HA_BRAND_RE = /(brands\.home-assistant\.io\/(_\/)?|\/api\/brands\/integration\/)(homeassistant|hassio|demo|homeassistant_hardware|compensation|emulated_hue|emulated_kasa|emulated_roku|lacrosse|picotts|rss_feed_template|seven_segments|simulated|syslog|tcp|telnet|trace|version|update|homeassistant_green|homeassistant_yellow|homeassistant_sky_connect|homeassistant_connect_zbt1|homeassistant_connect_zbt2)\//;
 
-function swapSvgForIcon(host) {
+// v1.29.0: ha-svg-icon elementen worden door de frontend hergebruikt (lijsten,
+// logboek). Krijgt een vervangen icoon later een ander pad, dan zetten we het
+// origineel terug; anders bleef ons logo op de verkeerde plaats staan.
+function swapSvgForIcon(host, on = true) {
   const sr = host.shadowRoot;
-  if (!sr || sr.querySelector(".bt-inline-logo")) return;
+  if (!sr) return;
   const svg = sr.querySelector("svg");
-  if (!svg) return;
+  const mine = sr.querySelector(".bt-inline-logo");
+  if (!on) {
+    if (mine) mine.remove();
+    if (svg) svg.style.display = "";
+    return;
+  }
+  if (mine || !svg) return;
   svg.style.display = "none";
   const img = document.createElement("img");
   img.className = "bt-inline-logo";
@@ -293,7 +303,7 @@ function patchInlineLogos() {
   deepQuery(document, "ha-logo-svg").forEach(swapSvgForIcon);
   deepQuery(document, "ha-svg-icon").forEach(el => {
     const p = el.path || el.getAttribute("path") || "";
-    if (p.startsWith(HA_PATH_PREFIX)) swapSvgForIcon(el);
+    swapSvgForIcon(el, p.startsWith(HA_PATH_PREFIX));
   });
   deepQuery(document, "img").forEach(img => {
     if (!img.dataset.bt && HA_BRAND_RE.test(img.getAttribute("src") || "")) {
@@ -314,8 +324,8 @@ function patchInlineLogos() {
 }
 
 // Externe HA / Open Home Foundation verwijzingen
-const EXT_HIDE_RE  = /openhomefoundation\.org|community\.home-assistant\.io|release-notes|\/blog\//;
-const EXT_HA_RE    = /home-assistant\.io|openhomefoundation\.org/;
+const EXT_HIDE_RE  = /ohf\.to|openhomefoundation\.org|community\.home-assistant\.io|release-notes|\/blog\//;
+const EXT_HA_RE    = /home-assistant\.io|openhomefoundation\.org|ohf\.to/;
 const BT_SITE      = "https://btechnics.be";
 
 function patchExternalLinks() {
@@ -426,6 +436,7 @@ function patchAll() {
 }
 
 function patchAllInner() {
+  disableSurvey();
   patchLaunchScreen();
   patchLoginPage();
   patchSidebar();
@@ -437,7 +448,71 @@ function patchAllInner() {
   deepReplaceAttrs(document.body, "Home Assistant", BRAND);
 }
 
+// v1.29.0: DE SERVICE WORKER VAN HA HIELD OUDE HA LOGO'S VAST.
+// Hij precachet favicon-192x192.png en favicon.ico, cachet alles onder /static/
+// "cache first" en brand iconen "stale while revalidate" (frontend
+// src/entrypoints/service-worker.ts, build-scripts/gulp/service-worker.js).
+// Wat voor onze vervanging in die cache belandde, bleef het HA huisje tonen,
+// ook al geeft de server nu het Btechnics logo. Eenmaal per versie halen we die
+// items uit alle caches; de service worker haalt ze dan opnieuw bij de server.
+const BT_VERSION = "1.29.0";
+const HA_CACHED_RE = new RegExp(
+  "/static/(icons/(favicon|mask-icon|apple-touch-icon|maskable_icon|tile-win|logo_ohf|ohf)" +
+  "|images/(home-assistant-logo|notification-badge|ohf-badge|open-home-foundation))" +
+  "|/api/brands/integration/(" + HA_BRAND_RE.source.split("(homeassistant|")[1].split(")")[0].replace(/^/, "homeassistant|") + ")/"
+);
+async function purgeHaCaches() {
+  try {
+    if (!("caches" in window)) return;
+    let klaar = null;
+    try { klaar = localStorage.getItem("bt-cache-purge"); } catch(e) {}
+    if (klaar === BT_VERSION) return;
+    let weg = 0;
+    for (const naam of await caches.keys()) {
+      const cache = await caches.open(naam);
+      for (const req of await cache.keys()) {
+        const url = new URL(req.url);
+        let del = HA_CACHED_RE.test(url.pathname);
+        // Oude HTML van de hoofdpagina zonder onze aanpassingen
+        if (!del && url.origin === location.origin && (url.pathname === "/" || url.pathname === "")) {
+          try {
+            const res = await cache.match(req);
+            const txt = res ? await res.clone().text() : "";
+            del = !!txt && !txt.includes("bt-hide");
+          } catch(e) {}
+        }
+        if (del && await cache.delete(req)) weg++;
+      }
+    }
+    try { localStorage.setItem("bt-cache-purge", BT_VERSION); } catch(e) {}
+    if (weg) console.info("[Btechnics] " + weg + " oude HA afbeeldingen uit de cache gehaald");
+  } catch(e) {}
+}
+
+// Vangnet voor de HA enquete: de backend zet dit al bij elke start, maar mocht
+// dat mislukken, dan doet de eerste eigenaar die de app opent het hier.
+let surveyChecked = false;
+async function disableSurvey() {
+  if (surveyChecked) return;
+  try {
+    const hass = document.querySelector("home-assistant")?.hass;
+    if (!hass?.user || !hass.systemData) return;
+    surveyChecked = true;
+    if (!hass.user.is_admin || hass.systemData.surveys?.onboarding) return;
+    await hass.callWS({
+      type: "frontend/set_system_data",
+      key: "core",
+      value: {
+        ...hass.systemData,
+        surveys: { ...(hass.systemData.surveys || {}),
+          onboarding: { date: new Date().toISOString(), action: "dismissed" } },
+      },
+    });
+  } catch(e) {}
+}
+
 (async () => {
+  purgeHaCaches();
   await loadConfig();
   applyZoom();
   patchColors();

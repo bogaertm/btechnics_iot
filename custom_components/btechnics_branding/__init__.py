@@ -1,4 +1,16 @@
-"""Btechnics IOT Branding v1.28.2.
+"""Btechnics IOT Branding v1.29.0.
+
+v1.29.0:
+- Enquete (onboarding survey) van HA volledig uit: bij elke start wordt in de
+  frontend systeemdata gezet dat ze al afgehandeld is, zodat de melding nooit
+  meer verschijnt bij de eigenaar.
+- Brands API: alle integraties die in de brands repo naar het HA logo wijzen
+  (o.a. version, trace, syslog, homeassistant_hardware, update, HA Green/Yellow)
+  krijgen nu het Btechnics icoon.
+- Static: ook maskable_icon, tile-win, notification-badge en de Open Home
+  Foundation afbeeldingen worden vervangen (OHF door een lege afbeelding).
+- Opstartscherm: het HA logo wordt al in de HTML vervangen door het Btechnics
+  logo, dus geen flits meer van het huisje voor de JS geladen is.
 
 v1.28.2:
 - Zoom wordt niet meer toegepast in de companion app (iOS/Android); de app zet
@@ -75,6 +87,7 @@ from aiohttp import web
 from homeassistant.components import frontend
 from homeassistant.components.http import HomeAssistantView, StaticPathConfig
 from homeassistant.core import HomeAssistant
+from homeassistant.util import dt as dt_util
 
 _LOGGER = logging.getLogger(__name__)
 DOMAIN = "btechnics_branding"
@@ -93,6 +106,7 @@ _LOGO_SVG_URL = "/btechnics_branding/logo.svg"
 _FAVICON_ICO_FILE = str(_DIR / "favicon.ico")
 
 _API_URL = "/api/btechnics_branding/config"
+_LAUNCH_LOGO_HA = "/static/images/home-assistant-logo-loading.svg"
 _CUSTOMER_LOGO_URL = "/btechnics_branding/customer-logo"
 _CUSTOMER_LOGO_DIR = "btechnics_branding"
 
@@ -113,7 +127,8 @@ def _entry_options(hass):
 
 _HIDE_CSS = (
     "<style id='bt-hide'>"
-    "#ha-launch-screen svg,#ha-launch-screen img.ha-logo{display:none!important}"
+    "#ha-launch-screen svg{display:none!important}"
+    "#ha-launch-screen img.ha-logo{width:auto!important;height:80px!important}"
     ".ohf-logo{display:none!important}"
     "</style>"
 )
@@ -234,6 +249,8 @@ def _patch_response(response, request_path: str):
     is_auth = "authorize" in request_path or "/auth/" in request_path
     inject = _HIDE_CSS + (_EXT_SCRIPT if is_auth else "")
     patched = text.replace("<head>", "<head>" + inject, 1)
+    # Opstartscherm: HA logo meteen in de HTML vervangen (geen flits voor de JS er is)
+    patched = patched.replace(_LAUNCH_LOGO_HA, _LOGO_SVG_URL)
     _LOGGER.warning("BT: HTML gepatcht voor %s (auth=%s)", request_path, is_auth)
     return web.Response(
         text=patched,
@@ -285,7 +302,17 @@ def _make_manifest_handler(original):
 
 
 _BRANDS_CANONICAL = "/api/brands/integration/{domain}/{image}"
-_BRANDS_DOMAINS = ("homeassistant", "hassio", "demo")
+# Alle domeinen die in de brands repo (core_integrations/*) een symlink naar
+# _homeassistant zijn, plus de HA-huisjes van update en de HA hardware.
+_BRANDS_DOMAINS = (
+    "homeassistant", "hassio", "demo", "homeassistant_hardware",
+    "compensation", "emulated_hue", "emulated_kasa", "emulated_roku",
+    "lacrosse", "picotts", "rss_feed_template", "seven_segments",
+    "simulated", "syslog", "tcp", "telnet", "trace", "version",
+    "update", "homeassistant_green", "homeassistant_yellow",
+    "homeassistant_sky_connect", "homeassistant_connect_zbt1",
+    "homeassistant_connect_zbt2",
+)
 _BRANDS_MARK = "_bt_brands_patched"
 
 
@@ -325,14 +352,19 @@ def _patch_brands_route(app: web.Application) -> None:
 _STATIC_PREFIX = "/static/"
 _STATIC_RE = re.compile(
     r"^/static/(icons/(favicon[^/]*\.png|favicon\.ico|mask-icon\.svg|"
-    r"apple-touch-icon[^/]*\.png|ha-icon[^/]*\.png)"
-    r"|images/home-assistant-logo[^/]*\.svg)$"
+    r"apple-touch-icon[^/]*\.png|ha-icon[^/]*\.png|maskable_icon[^/]*\.png|"
+    r"tile-win[^/]*\.png|logo_ohf\.svg|ohf\.svg)"
+    r"|images/(home-assistant-logo[^/]*\.svg|notification-badge\.png|"
+    r"ohf-badge\.svg|open-home-foundation[^/]*\.svg))$"
 )
+_BLANK_SVG = b'<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/>'
 
 
 def _static_override(path: str):
     if not _STATIC_RE.match(path):
         return None
+    if "ohf" in path or "open-home-foundation" in path:
+        return "BLANK", "image/svg+xml"
     if path.endswith(".ico"):
         return _FAVICON_ICO_FILE, "image/x-icon"
     if path.endswith(".svg"):
@@ -347,6 +379,11 @@ def _make_static_handler(original):
         override = _static_override(request.path)
         if override:
             file_path, ctype = override
+            if file_path == "BLANK":
+                return web.Response(
+                    body=_BLANK_SVG, content_type="image/svg+xml",
+                    headers={"Cache-Control": "public, max-age=86400"},
+                )
             return web.FileResponse(
                 file_path,
                 headers={"Cache-Control": "public, max-age=86400", "Content-Type": ctype},
@@ -403,6 +440,34 @@ def _patch_routes(app: web.Application) -> None:
     _LOGGER.warning("BT: %d routes gepatcht: %s", len(patched), patched[:12])
 
 
+async def _disable_onboarding_survey(hass: HomeAssistant) -> None:
+    """Zet de HA enquete definitief op afgehandeld.
+
+    De frontend toont de enquete aan de eigenaar tussen 5 en 30 dagen na de
+    installatie, tenzij frontend systeemdata core.surveys.onboarding bestaat
+    (frontend src/util/onboarding-survey.ts). Die sleutel zetten we hier zelf.
+    """
+    try:
+        from homeassistant.components.frontend.storage import async_system_store
+    except ImportError:
+        return
+    try:
+        store = await async_system_store(hass)
+        core = dict(store.data.get("core") or {})
+        surveys = dict(core.get("surveys") or {})
+        if surveys.get("onboarding"):
+            return
+        surveys["onboarding"] = {
+            "date": dt_util.utcnow().isoformat(),
+            "action": "dismissed",
+        }
+        core["surveys"] = surveys
+        await store.async_set_item("core", core)
+        _LOGGER.warning("BT: HA enquete uitgeschakeld")
+    except Exception as err:  # noqa: BLE001
+        _LOGGER.warning("BT: enquete uitschakelen mislukt: %s", err)
+
+
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
     return True
 
@@ -430,14 +495,17 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
     _patch_brands_route(hass.http.app)
     _patch_static_route(hass.http.app)
 
+    await _disable_onboarding_survey(hass)
+
     async def _delayed(_now=None):
+        await _disable_onboarding_survey(hass)
         _patch_routes(hass.http.app)
         _patch_brands_route(hass.http.app)
         _patch_static_route(hass.http.app)
 
     hass.bus.async_listen_once("homeassistant_started", _delayed)
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    _LOGGER.warning("BT: v1.28.2 klaar, klantenlogo ondersteund")
+    _LOGGER.warning("BT: v1.29.0 klaar, klantenlogo ondersteund")
     return True
 
 
