@@ -29,3 +29,12 @@ frontend:
     - /btechnics_branding/btechnics-branding.js
 ```
 7. Herstart de installatie opnieuw
+
+## Na een update
+
+De branding haakt in op de interne opbouw van het systeem. Daarom zijn er twee vangnetten:
+
+- **Zelfcontrole**: na elke start kijkt de integratie of alle aanpassingen nog werken. Werkt iets niet meer, dan verschijnt er een melding onder Instellingen > Reparaties met wat er stuk is. Het systeem zelf blijft gewoon werken.
+- **Compatibiliteitstest**: `tests/compat` start een echte container met de gekozen versie (stable, beta of dev), installeert de integratie en controleert server en interface. Draai die voor je klanten een nieuwe versie laat installeren.
+
+Lokaal testen: `bash tests/compat/run.sh stable` (Docker en Node 22 nodig, eerst `npm install` en `npx playwright install chromium` in `tests/compat`).

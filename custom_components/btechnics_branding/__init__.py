@@ -1,4 +1,10 @@
-"""Btechnics IOT Branding v1.29.1.
+"""Btechnics IOT Branding v1.30.0.
+
+v1.30.0:
+- Zelfcontrole na elke start: controleert of alle haken in HA nog werken
+  (pagina's, manifest, brands, static iconen, enquete, JS) en of de frontend
+  de zijbalk en systeemdata nog vindt. Werkt iets niet meer na een HA update,
+  dan verschijnt een melding onder Instellingen > Reparaties met wat er stuk is.
 
 v1.29.1 (audit):
 - HTML routes werden bij elke start twee keer ingepakt (bij setup en bij
@@ -97,7 +103,9 @@ import re
 from aiohttp import web
 from homeassistant.components import frontend
 from homeassistant.components.http import HomeAssistantView, StaticPathConfig
-from homeassistant.core import HomeAssistant
+from homeassistant.const import __version__ as HA_VERSION
+from homeassistant.core import HomeAssistant, callback
+from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
 
 _LOGGER = logging.getLogger(__name__)
@@ -499,6 +507,7 @@ async def _disable_onboarding_survey(hass: HomeAssistant) -> None:
     try:
         from homeassistant.components.frontend.storage import async_system_store
     except ImportError:
+        _health(hass)["backend"].add("survey")
         return
     try:
         store = await async_system_store(hass)
@@ -514,7 +523,103 @@ async def _disable_onboarding_survey(hass: HomeAssistant) -> None:
         await store.async_set_item("core", core)
         _LOGGER.info("BT: HA enquete uitgeschakeld")
     except Exception as err:  # noqa: BLE001
+        _health(hass)["backend"].add("survey")
         _LOGGER.warning("BT: enquete uitschakelen mislukt: %s", err)
+
+
+# --- Zelfcontrole -------------------------------------------------------------
+_HEALTH_KEY = "btechnics_branding_health"
+_HEALTH_URL = "/api/btechnics_branding/health"
+_ISSUE_ID = "hooks_broken"
+_HEALTH_LABELS = {
+    "pages": "pagina's (index en aanmeldscherm)",
+    "manifest": "app manifest",
+    "brands": "brand iconen",
+    "static": "HA iconen en favicon",
+    "survey": "enquete uitschakelen",
+    "js": "Btechnics script in de frontend",
+    "sidebar": "zijbalk (logo en tekst)",
+    "systemdata": "systeemdata in de frontend",
+    "launch": "opstartscherm",
+}
+
+
+def _health(hass) -> dict:
+    return hass.data.setdefault(_HEALTH_KEY, {"backend": set(), "frontend": set()})
+
+
+def _route_marked(app: web.Application, canonical: str, mark: str) -> bool:
+    for resource in app.router.resources():
+        if (getattr(resource, "canonical", "") or "").rstrip("/") != canonical.rstrip("/"):
+            continue
+        for route in resource:
+            if getattr(route._handler, mark, False):
+                return True
+    return False
+
+
+def _check_backend(hass) -> set[str]:
+    app = hass.http.app
+    problems = set()
+    if not _route_marked(app, "/", "_bt_html_patched"):
+        problems.add("pages")
+    if not _route_marked(app, "/manifest.json", "_bt_html_patched"):
+        problems.add("manifest")
+    if not _route_marked(app, _BRANDS_CANONICAL, _BRANDS_MARK):
+        problems.add("brands")
+    if not _route_marked(app, "/static", "_bt_static_patched"):
+        problems.add("static")
+    problems |= _health(hass)["backend"] & {"survey", "js"}
+    return problems
+
+
+@callback
+def _update_issue(hass) -> None:
+    state = _health(hass)
+    problems = sorted(state["backend"] | state["frontend"])
+    if not problems:
+        ir.async_delete_issue(hass, DOMAIN, _ISSUE_ID)
+        return
+    _LOGGER.warning("BT zelfcontrole: werkt niet meer na update: %s", problems)
+    ir.async_create_issue(
+        hass,
+        DOMAIN,
+        _ISSUE_ID,
+        is_fixable=False,
+        severity=ir.IssueSeverity.WARNING,
+        translation_key=_ISSUE_ID,
+        translation_placeholders={
+            "problems": ", ".join(_HEALTH_LABELS.get(p, p) for p in problems),
+            "ha_version": HA_VERSION,
+        },
+    )
+
+
+class BtechnicsBrandingHealthView(HomeAssistantView):
+    """De frontend meldt hier wat hij niet (meer) vindt. Enkel voor admins."""
+
+    url = _HEALTH_URL
+    name = "api:btechnics_branding:health"
+    requires_auth = True
+
+    def __init__(self, hass):
+        self.hass = hass
+
+    async def post(self, request):
+        user = request.get("hass_user")
+        if user is None or not user.is_admin:
+            return web.Response(status=403)
+        try:
+            data = await request.json()
+        except ValueError:
+            return web.Response(status=400)
+        allowed = {"sidebar", "systemdata", "launch"}
+        found = {p for p in data.get("problems", []) if p in allowed}
+        state = _health(self.hass)
+        if found != state["frontend"]:
+            state["frontend"] = found
+            _update_issue(self.hass)
+        return self.json({"ok": True})
 
 
 async def async_setup(hass: HomeAssistant, config: dict) -> bool:
@@ -534,10 +639,12 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
     hass.http.register_view(BtechnicsBrandingJsView())
     hass.http.register_view(BtechnicsBrandingConfigView(hass))
     hass.http.register_view(BtechnicsBrandingCustomerLogoView(hass))
+    hass.http.register_view(BtechnicsBrandingHealthView(hass))
 
     try:
         frontend.add_extra_js_url(hass, _JS_URL)
     except Exception as err:
+        _health(hass)["backend"].add("js")
         _LOGGER.warning("add_extra_js_url: %s", err)
 
     _patch_routes(hass.http.app)
@@ -551,10 +658,16 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
         _patch_routes(hass.http.app)
         _patch_brands_route(hass.http.app)
         _patch_static_route(hass.http.app)
+        state = _health(hass)
+        state["backend"] = _check_backend(hass)
+        _update_issue(hass)
 
-    hass.bus.async_listen_once("homeassistant_started", _delayed)
+    if hass.is_running:
+        hass.async_create_task(_delayed())
+    else:
+        hass.bus.async_listen_once("homeassistant_started", _delayed)
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    _LOGGER.info("BT: v1.29.1 klaar")
+    _LOGGER.info("BT: v1.30.0 klaar")
     return True
 
 

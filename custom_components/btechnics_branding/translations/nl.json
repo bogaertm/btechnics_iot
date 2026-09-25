@@ -33,5 +33,11 @@
     "error": {
       "invalid_logo": "Bestand is geen geldige afbeelding (png, jpg, svg, webp of gif)."
     }
+  },
+  "issues": {
+    "hooks_broken": {
+      "title": "Btechnics IOT: branding na update deels buiten werking",
+      "description": "Na de update naar versie {ha_version} werken deze onderdelen van de Btechnics IOT branding niet meer: {problems}.\n\nHet systeem zelf werkt gewoon; op die plaatsen kan het oorspronkelijke logo of de oorspronkelijke naam terug te zien zijn. Werk Btechnics IOT Features bij via HACS zodra er een nieuwe versie is, of contacteer Btechnics."
+    }
   }
 }

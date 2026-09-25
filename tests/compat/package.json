@@ -1,0 +1,9 @@
+{
+  "name": "btechnics-iot-compat",
+  "private": true,
+  "type": "module",
+  "description": "Test Btechnics IOT Features tegen een echte HA container",
+  "dependencies": {
+    "playwright": "^1.55.0"
+  }
+}

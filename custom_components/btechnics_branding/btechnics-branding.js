@@ -1,5 +1,5 @@
 /**
- * Btechnics IOT Branding v1.29.1
+ * Btechnics IOT Branding v1.30.0
  *
  * v1.28.2: zoom van de hele interface instelbaar per desktop en mobiel
  *          (opties zoom_desktop, zoom_mobile, zoom_breakpoint; standaard
@@ -208,6 +208,7 @@ function patchSidebar() {
 
   const title = sr.querySelector(".title");
   if (!title) return;
+  health.sidebar = true;
 
   for (const node of [...title.childNodes])
     if (node.nodeType === Node.TEXT_NODE) node.remove();
@@ -449,6 +450,28 @@ function patchAll() {
   patching = true;
   try { patchAllInner(); } finally { patching = false; }
 }
+
+// v1.30.0: ZELFCONTROLE. Na een HA update kan de opbouw van de pagina veranderen.
+// 20 s na het laden kijken we of we de zijbalk en de systeemdata nog vinden en
+// melden dat aan de integratie (enkel admins). Die zet dan een melding onder
+// Instellingen > Reparaties, of haalt ze weg als alles weer werkt.
+const health = { sidebar: false, reported: false };
+function reportHealth() {
+  try {
+    if (health.reported) return;
+    const ha = document.querySelector("home-assistant");
+    const hass = ha && ha.hass;
+    if (!hass || !hass.user || !hass.user.is_admin || !hass.callApi) return;
+    // Enkel oordelen als de gewone interface er staat (geen login, geen onboarding)
+    if (!ha.shadowRoot || !ha.shadowRoot.querySelector("home-assistant-main")) return;
+    health.reported = true;
+    const problems = [];
+    if (!health.sidebar) problems.push("sidebar");
+    if (typeof hass.systemData === "undefined") problems.push("systemdata");
+    hass.callApi("POST", "btechnics_branding/health", { problems }).catch(() => {});
+  } catch(e) {}
+}
+setTimeout(reportHealth, 20000);
 
 // v1.29.1: HOME ASSISTANT CLOUD (NABU CASA) VERBERGEN.
 // Door de naamvervanging stond er "Btechnics IOT Cloud is een abonnementsdienst met
