@@ -50,6 +50,14 @@ Vul in de opties de **sleutel van deze klant** in (aan te maken in de Work-app).
 
 Service `btechnics_branding.send_status` verstuurt meteen en toont wat er verstuurd werd. Het adres moet met https:// beginnen (enkel een lokaal adres mag http). Beide services (`run_updates` en `send_status`) zijn enkel voor beheerders.
 
+## Bediening op afstand
+
+Met een sleutel ingevuld en **Bediening op afstand door Btechnics** aan (standaard aan), haalt de installatie elke minuut opdrachten op bij de Work-app. Er hoeft geen poort open. Enkel deze opdrachten bestaan: automatische updates aan/uit en instellen, de run nu starten (of enkel tonen), een update installeren, overslaan of terugzetten, mislukte pogingen wissen en de status meteen versturen. Al de rest wordt geweigerd. Alles komt in Activiteit onder "Btechnics IOT updates".
+
+## Woordkeuze
+
+In het Nederlands spreekt Home Assistant van "woning", "je huis" en "Welkom thuis". Btechnics IOT maakt daar neutrale woorden van, voor woningen en bedrijven: "Algemeen" in plaats van "Woninginformatie", "Locatienaam", "je locatie", "Welkom!". Andere talen blijven ongemoeid.
+
 ## Diagnose en verwijderen
 
 - **Diagnose downloaden** (Instellingen > Apparaten en diensten > Btechnics IOT > drie puntjes): alles wat de integratie weet in een bestand, zonder sleutel. Handig bij support.

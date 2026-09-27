@@ -181,6 +181,8 @@ class BtechnicsBrandingOptionsFlow(config_entries.OptionsFlow):
         schema[vol.Optional("status_token", description={"suggested_value": current.get("status_token", "")})] = selector.TextSelector(
             selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
         )
+        # v1.34.0: Btechnics mag updates vanop afstand beheren (remote.py)
+        schema[vol.Optional("remote_control", default=current.get("remote_control", True))] = bool
 
         return self.async_show_form(
             step_id="init",

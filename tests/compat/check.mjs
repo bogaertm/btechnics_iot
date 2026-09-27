@@ -193,6 +193,54 @@ ok("Zelfcontrole maakt en wist melding", na1 === 1 && na2 === 0, `${na1} -> ${na
 const anon = await fetch(BASE + "/api/btechnics_branding/health", { method: "POST", body: "{}" });
 ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
 
+// ---------------------------------------------------------------- woordkeuze (v1.34.0)
+// Nederlandstalige browser: "woning", "je huis" en "Welkom thuis" worden neutraal.
+{
+  const deepText = () => {
+    const out = [];
+    const walk = (r) => {
+      const tw = document.createTreeWalker(r, NodeFilter.SHOW_TEXT);
+      let n; while ((n = tw.nextNode())) { const t = n.parentNode && n.parentNode.nodeName; if (t !== "SCRIPT" && t !== "STYLE") out.push(n.textContent); }
+      r.querySelectorAll("*").forEach((el) => { if (el.shadowRoot) walk(el.shadowRoot); });
+    };
+    walk(document);
+    return out.join(" | ");
+  };
+  const nlLogin = await browser.newContext({ locale: "nl-BE" });
+  const lp = await nlLogin.newPage();
+  await lp.goto(BASE + "/auth/authorize?response_type=code&client_id=" + encodeURIComponent(CLIENT_ID) + "&redirect_uri=" + encodeURIComponent(CLIENT_ID));
+  await sleep(6000);
+  const lt = await lp.evaluate(deepText);
+  ok("NL aanmeldscherm: Welkom! (niet thuis)", lt.includes("Welkom!") && !/Welkom thuis/.test(lt), (lt.match(/Welkom[^|]{0,20}/) || [""])[0]);
+  await nlLogin.close();
+
+  const nl = await browser.newContext({ locale: "nl-BE", viewport: { width: 1400, height: 900 } });
+  await nl.addInitScript((t) => { localStorage.setItem("hassTokens", JSON.stringify(t)); localStorage.setItem("selectedLanguage", JSON.stringify("nl")); }, stored);
+  const np = await nl.newPage();
+  await np.goto(BASE + "/config/dashboard"); await sleep(8000);
+  const dt = await np.evaluate(deepText);
+  const loc = await np.evaluate(async () => {
+    const u = performance.getEntriesByType("resource").map((e) => e.name).find((n) => /\/static\/translations\/config\/nl-[0-9a-f]+\.json/.test(n));
+    if (!u) return ["geen config vertaling geladen"];
+    const d = await (await fetch(u)).json();
+    return [d["ui.panel.config.automation.description"], d["ui.panel.config.dashboard.people.secondary"], d["ui.panel.config.energy.battery.title"]];
+  });
+  ok("NL teksten: 'je locatie' i.p.v. 'je huis'", /je locatie/.test(loc[0]) && /je locatie/.test(loc[1] || "") && !/huis|woning/i.test(loc.join(" ")), JSON.stringify(loc));
+  await np.goto(BASE + "/config/system"); await sleep(6000);
+  const st = await np.evaluate(deepText);
+  ok("NL Systeem: Algemeen i.p.v. Woninginformatie", st.includes("Algemeen") && !st.includes("Woninginformatie"), (st.match(/Algemeen|Woninginformatie/) || ["niets"])[0]);
+  await np.screenshot({ path: (process.env.SHOT || "/tmp/bt.png").replace(/\.png$/, "_systeem.png") });
+  await np.goto(BASE + "/config/general"); await sleep(6000);
+  const ct = await np.evaluate(deepText);
+  ok("NL Algemeen: Locatienaam i.p.v. Woningnaam", ct.includes("Locatienaam") && !ct.includes("Woningnaam"), (ct.match(/Locatienaam|Woningnaam/) || ["niets"])[0]);
+  await np.screenshot({ path: (process.env.SHOT || "/tmp/bt.png").replace(/\.png$/, "_algemeen.png") });
+  await nl.close();
+  // Engelstalig blijft ongemoeid
+  await page.goto(BASE + "/config/general"); await sleep(6000);
+  const et = await page.evaluate(deepText);
+  ok("EN ongemoeid", !et.includes("Locatienaam"), (et.match(/Home name|Location name|Name/) || ["?"])[0]);
+}
+
 // ---------------------------------------------------------------- automatische updates
 // Testentiteiten (tests/compat/fake_update): update.test_ok slaagt,
 // update.test_faalt mislukt altijd, update.test_enkel_melding kan niet installeren.
@@ -336,12 +384,19 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   // v1.33.0: status naar Btechnics. Nep Work-app op de host (docker gateway).
   const http = await import("node:http");
   const ontvangen = [];
+  const wachtrij = [], resultaten = [], opgehaald = [];
   const srv = http.createServer((req, res) => {
     let body = "";
     req.on("data", (c) => (body += c));
     req.on("end", () => {
+      res.writeHead(200, { "content-type": "application/json" });
+      if (req.method === "GET" && req.url.startsWith("/commands")) {
+        opgehaald.push(req.headers.authorization);
+        const q = wachtrij.splice(0); return res.end(JSON.stringify({ commands: q }));
+      }
+      if (req.url.startsWith("/commands/result")) { try { resultaten.push(JSON.parse(body)); } catch (e) {} return res.end("{}"); }
       try { ontvangen.push({ auth: req.headers.authorization, body: JSON.parse(body) }); } catch (e) {}
-      res.writeHead(200, { "content-type": "application/json" }); res.end("{}");
+      res.end("{}");
     });
   });
   await new Promise((r) => srv.listen(8999, "0.0.0.0", r));
@@ -356,8 +411,34 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   // v1.33.1: https verplicht (behalve lokaal adres)
   const fout = await setOpts({ ...ALLES, status_url: "http://work.btechnics.be/api/iot/status", status_token: "testsleutel" });
   ok("Status: http naar buiten geweigerd", fout.f.type === "form" && fout.f.errors && fout.f.errors.status_url === "status_url_https", JSON.stringify(fout.f.errors));
-  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.33.1" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
+  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.34.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
   ok("Status: geen sleutel in het bericht", !JSON.stringify(b).includes("testsleutel"));
+
+  // v1.34.0: bediening op afstand. De installatie haalt elke minuut opdrachten op.
+  wachtrij.push(
+    { id: "c1", type: "set_auto_update", time: "05:30", categories: ["system", "addons", "hacs", "firmware"], backup: false },
+    { id: "c2", type: "run_updates", dry_run: true },
+    { id: "c3", type: "retry_failed", entity_id: "update.test_faalt" },
+    { id: "c4", type: "skip_update", entity_id: "update.test_faalt" },
+    { id: "c5", type: "clear_skipped", entity_id: "update.test_faalt" },
+    { id: "c6", type: "install_update", entity_id: "update.test_faalt" },
+    { id: "c7", type: "restart" },
+    { id: "c8", type: "install_update", entity_id: "light.keuken" },
+  );
+  for (let i = 0; i < 30 && resultaten.length < 8; i++) await sleep(3000);
+  const R = Object.fromEntries(resultaten.map((x) => [x.id, x]));
+  ok("Op afstand: opdrachten opgehaald met sleutel", opgehaald.length > 0 && opgehaald.every((a) => a === "Bearer testsleutel"), String(opgehaald.length));
+  ok("Op afstand: alle 8 resultaten terug", resultaten.length === 8, resultaten.map((x) => x.id + ":" + x.ok).join(","));
+  ok("Op afstand: instellingen aangepast", R.c1 && R.c1.ok && R.c1.result.time === "05:30:00" && R.c1.result.backup === false, JSON.stringify(R.c1));
+  ok("Op afstand: dry run", R.c2 && R.c2.ok && Array.isArray(R.c2.result.zou_installeren), JSON.stringify(R.c2 && R.c2.result));
+  ok("Op afstand: overslaan en terugzetten", R.c4 && R.c4.ok && R.c5 && R.c5.ok && (await st("update.test_faalt")).state === "on", JSON.stringify([R.c4, R.c5]));
+  ok("Op afstand: mislukte installatie gemeld", R.c6 && R.c6.ok === false && /testfout/.test(R.c6.error), JSON.stringify(R.c6));
+  ok("Op afstand: onbekende opdracht geweigerd", R.c7 && R.c7.ok === false && /onbekende opdracht/.test(R.c7.error), JSON.stringify(R.c7));
+  ok("Op afstand: enkel update entiteiten", R.c8 && R.c8.ok === false && /update\.\*/.test(R.c8.error), JSON.stringify(R.c8));
+  ok("Op afstand: na retry_failed weer verborgen", R.c3 && R.c3.ok && (await reg("update.test_faalt")).hidden_by === "integration", String((await reg("update.test_faalt")).hidden_by));
+  await sleep(12000);
+  const naOpAfstand = ontvangen.filter((x) => /op_afstand/.test(x.body.reason || ""));
+  ok("Op afstand: status meteen bijgewerkt", naOpAfstand.length > 0 && naOpAfstand[naOpAfstand.length - 1].body.auto_update.time === "05:30:00", JSON.stringify(naOpAfstand.map((x) => x.body.reason)));
 
   // Diagnose downloaden: zonder sleutel
   const diag = await (await fetch(BASE + "/api/diagnostics/config_entry/" + entry.entry_id, { headers: H })).json();

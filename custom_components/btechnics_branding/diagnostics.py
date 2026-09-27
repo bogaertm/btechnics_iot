@@ -31,6 +31,7 @@ async def async_get_config_entry_diagnostics(hass: HomeAssistant, entry) -> dict
             "pogingen": tracker.attempts if tracker else None,
             "door_ons_verborgen": sorted(tracker.hidden) if tracker else None,
         },
+        "op_afstand": (hass.data.get("btechnics_branding_remote") or {}).get("last"),
         "status_naar_btechnics": {
             "laatste": (hass.data.get("btechnics_branding_status") or {}).get("last"),
             "bericht": await status.async_build(hass, options, "diagnose"),

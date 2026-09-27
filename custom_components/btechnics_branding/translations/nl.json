@@ -31,7 +31,8 @@
           "auto_update_categories": "Wat mag automatisch bijgewerkt worden",
           "auto_update_backup": "Back-up voor elke update",
           "status_url": "Adres voor de status naar Btechnics",
-          "status_token": "Sleutel van deze klant (uit de Work-app)"
+          "status_token": "Sleutel van deze klant (uit de Work-app)",
+          "remote_control": "Bediening op afstand door Btechnics (updates beheren)"
         },
         "description": "Huidig klantenlogo: {customer_logo_status}\n\nStatus naar Btechnics: vul de sleutel van deze klant in. Zonder sleutel wordt niets verstuurd."
       }

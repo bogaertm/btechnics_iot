@@ -121,7 +121,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
 
-from . import auto_update, status
+from . import auto_update, remote, status
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 _LOGGER = logging.getLogger(__name__)
@@ -180,6 +180,43 @@ _HIDE_CSS = (
     "</style>"
 )
 _EXT_SCRIPT = '<script src="/btechnics_branding/btechnics-branding.js" type="module"></script>'
+
+# v1.34.0: WOORDKEUZE VOOR WONINGEN EN BEDRIJVEN.
+# HA spreekt in het Nederlands overal van "woning", "je huis" en "Welkom thuis".
+# Btechnics IOT draait ook in bedrijven, dus neutrale woorden. De frontend haalt
+# zijn vertalingen op als /static/translations/[fragment/]nl-<hash>.json
+# (frontend src/util/common-translation.ts). Dit script staat als eerste in de
+# <head>, nog voor HA zelf laadt, en past die bestanden aan op het moment dat ze
+# binnenkomen. Zo werkt het ook als de browser of de app ze al in de cache heeft.
+_TR_KEYS = {
+    "ui.panel.config.core.caption": "Algemeen",
+    "ui.dialogs.quick-bar.commands.navigation.general": "Algemeen",
+    "ui.panel.config.core.section.core.home_name_card.header": "Locatienaam",
+    "ui.panel.page-authorize.welcome_home": "Welkom!",
+    "ui.panel.lovelace.strategy.original-states.empty_state_title": "Welkom",
+    "ui.panel.page-onboarding.core-config.location_header": "Locatie",
+    "ui.panel.config.energy.battery.title": "Batterijopslag",
+}
+_TR_RULES = [
+    [r"\b(je|jouw) (huis|woning)\b", "$1 locatie"],
+    [r"\bThuisbatterij", "Batterij"],
+    [r"\bthuisbatterij", "batterij"],
+]
+_TR_SCRIPT = (
+    "<script>(function(){var K=" + json.dumps(_TR_KEYS, ensure_ascii=False)
+    + ",R=" + json.dumps(_TR_RULES)
+    + ".map(function(x){return [new RegExp(x[0],'g'),x[1]]});"
+    "var M=/\\/static\\/translations\\/(?:[\\w-]+\\/)?nl-[0-9a-f]+\\.json/;"
+    "var f=window.fetch;if(!f||f._bt)return;"
+    "var w=function(i,o){var u=typeof i==='string'?i:(i&&i.url)||'';"
+    "var p=f.apply(window,arguments);if(!M.test(u))return p;"
+    "return p.then(function(r){if(!r.ok)return r;return r.clone().json().then(function(d){"
+    "for(var k in d){var v=d[k];if(typeof v!=='string')continue;"
+    "if(K.hasOwnProperty(k)){d[k]=K[k];continue}"
+    "for(var j=0;j<R.length;j++)v=v.replace(R[j][0],R[j][1]);d[k]=v}"
+    "return new Response(JSON.stringify(d),{status:r.status,headers:{'Content-Type':'application/json'}})"
+    "},function(){return r})})};w._bt=1;window.fetch=w})();</script>"
+)
 
 
 class BtechnicsBrandingJsView(HomeAssistantView):
@@ -295,7 +332,7 @@ def _patch_response(response, request_path: str, file_text: str | None = None):
         return None
 
     is_auth = "authorize" in request_path or "/auth/" in request_path
-    inject = _HIDE_CSS + (_EXT_SCRIPT if is_auth else "")
+    inject = _TR_SCRIPT + _HIDE_CSS + (_EXT_SCRIPT if is_auth else "")
     patched = text.replace("<head>", "<head>" + inject, 1)
     # Opstartscherm: HA logo meteen in de HTML vervangen (geen flits voor de JS er is)
     patched = patched.replace(_LAUNCH_LOGO_HA, _LOGO_SVG_URL)
@@ -699,13 +736,14 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
     await auto_update.async_setup_visibility(hass, lambda: dict(entry.options))
     status.register_services(hass, lambda: dict(entry.options))
     await status.async_setup(hass, lambda: dict(entry.options))
+    await remote.async_setup(hass, entry)
 
     if hass.is_running:
         hass.async_create_task(_delayed())
     else:
         hass.bus.async_listen_once("homeassistant_started", _delayed)
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    _LOGGER.info("BT: v1.33.1 klaar")
+    _LOGGER.info("BT: v1.34.0 klaar")
     return True
 
 
@@ -720,6 +758,7 @@ async def async_unload_entry(hass: HomeAssistant, entry) -> bool:
     auto_update.async_unschedule(hass)
     auto_update.async_teardown_visibility(hass)
     status.async_teardown(hass)
+    remote.async_teardown(hass)
     # v1.33.1: services weg, anders werken ze verder met de oude instellingen
     for service in ("run_updates", "send_status"):
         hass.services.async_remove(DOMAIN, service)

@@ -31,7 +31,8 @@
           "auto_update_categories": "What may be updated automatically",
           "auto_update_backup": "Back up before each update",
           "status_url": "Address for the status to Btechnics",
-          "status_token": "Key of this customer (from the Work app)"
+          "status_token": "Key of this customer (from the Work app)",
+          "remote_control": "Remote management by Btechnics (manage updates)"
         },
         "description": "Current customer logo: {customer_logo_status}\n\nStatus to Btechnics: fill in the key of this customer. Without a key nothing is sent."
       }

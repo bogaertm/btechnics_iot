@@ -82,8 +82,12 @@ async def async_build(hass: HomeAssistant, options: dict, reason: str) -> dict[s
         entry = reg.async_get(st.entity_id)
         latest = st.attributes.get("latest_version")
         attempts = tracker.count(st.entity_id, latest) if tracker else 0
+        feats = int(st.attributes.get("supported_features", 0) or 0)
         pending.append({
             "entity_id": st.entity_id,
+            "installable": bool(feats & 1),
+            "backup_supported": bool(feats & 8),
+            "in_progress": bool(st.attributes.get("in_progress")),
             "name": str(st.attributes.get("title") or st.attributes.get("friendly_name") or st.entity_id),
             "installed": st.attributes.get("installed_version"),
             "latest": latest,
@@ -93,6 +97,12 @@ async def async_build(hass: HomeAssistant, options: dict, reason: str) -> dict[s
             "failed": attempts >= auto_update.MAX_ATTEMPTS,
         })
 
+    skipped_list = [
+        {"entity_id": s.entity_id,
+         "name": str(s.attributes.get("title") or s.attributes.get("friendly_name") or s.entity_id),
+         "skipped_version": s.attributes.get("skipped_version")}
+        for s in hass.states.async_all("update") if s.attributes.get("skipped_version")
+    ]
     last = hass.data.get("btechnics_branding_update_last")
     return {
         "schema": SCHEMA_VERSION,
@@ -109,15 +119,22 @@ async def async_build(hass: HomeAssistant, options: dict, reason: str) -> dict[s
             "os_version": info.get("os_version"),
         },
         "branding": {"ok": not problems, "problems": problems},
+        # v1.34.0: bediening op afstand (remote.py)
+        "remote": {
+            "enabled": bool(options.get("remote_control", True)),
+            "last_poll": (hass.data.get("btechnics_branding_remote") or {}).get("last"),
+        },
         "auto_update": {
             "enabled": bool(options.get(auto_update.CONF_ENABLED, False)),
             "time": options.get(auto_update.CONF_TIME, auto_update.DEFAULT_TIME),
             "categories": list(options.get(auto_update.CONF_CATEGORIES, auto_update.DEFAULT_CATEGORIES)),
+            "backup": bool(options.get(auto_update.CONF_BACKUP, True)),
             "last_run": last,
         },
         "updates": {
             "pending": pending,
             "failed": [p for p in pending if p["failed"]],
+            "skipped": skipped_list,
         },
     }
 
