@@ -88,4 +88,12 @@ check("Core beta nooit", "Core" not in [u["name"] for u in todo])
 todo, _ = run(STATES, {"auto_update_categories": ["firmware"]})
 check("enkel firmware", [u["name"] for u in todo] == ["Shelly"], str([u["name"] for u in todo]))
 
+# Verbergen (v1.32.1): wat we nooit installeren, blijft zichtbaar
+ON = {"auto_update": True, "auto_update_categories": ["system", "addons", "hacs"]}
+check("verbergen: Core x.1", au._managed(STATES[0], "core", ON))
+check("verbergen: Core x.0 (wordt x.1)", au._managed(s2[0], "core", ON))
+check("tonen: Core beta", not au._managed(s3[0], "core", ON))
+check("tonen: firmware zonder vinkje", not au._managed(STATES[5], "firmware", ON))
+check("tonen: automatische updates uit", not au._managed(STATES[3], "addon", {**ON, "auto_update": False}))
+
 sys.exit(1 if fails else 0)

@@ -237,11 +237,40 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   ok("Run 1: test_faalt nog verborgen na 1 poging", (await reg("update.test_faalt")).hidden_by === "integration");
   ok("Run 1: nog geen melding", !(await issues()).some((i) => i.startsWith("update_failed_")));
 
+  // v1.32.1: even unavailable (opstarten, herstart) mag de telling niet wissen
+  await fetch(BASE + "/api/states/update.test_faalt", { method: "POST", headers: H, body: JSON.stringify({ state: "unavailable" }) });
+  await sleep(1500);
+  ok("Unavailable: blijft verborgen", (await reg("update.test_faalt")).hidden_by === "integration");
+  await fetch(BASE + "/api/services/homeassistant/update_entity", { method: "POST", headers: H, body: JSON.stringify({ entity_id: "update.test_faalt" }) });
+  await sleep(1500);
+  ok("Unavailable: daarna terug aan en verborgen", (await st("update.test_faalt")).state === "on" && (await reg("update.test_faalt")).hidden_by === "integration");
+
   await call(false); await sleep(4000);
   ok("Run 2: test_faalt zichtbaar na 2 pogingen", (await reg("update.test_faalt")).hidden_by === null);
   ok("Run 2: melding onder Reparaties", (await issues()).includes("update_failed_update.test_faalt"), (await issues()).join(","));
   await page.goto(BASE + "/config/dashboard"); await sleep(8000);
   ok("Zijbalk toont de mislukte update", (await badge()) === 1, String(await badge()));
+
+  // v1.32.1: icoon van een HACS update (brands.home-assistant.io kent Btechnics niet)
+  const badgeBg = () => page.evaluate(() => {
+    const out = [];
+    const walk = (r) => r.querySelectorAll("*").forEach((el) => {
+      if (el.tagName === "STATE-BADGE" && el.stateObj && el.stateObj.entity_id === "update.test_faalt") out.push(el.style.backgroundImage);
+      if (el.shadowRoot) walk(el.shadowRoot);
+    });
+    walk(document);
+    return out;
+  });
+  let bgs = await badgeBg();
+  ok("Update icoon: Btechnics logo", bgs.length > 0 && bgs.every((b) => b.includes("/btechnics_branding/app-icon-192.png")), JSON.stringify(bgs));
+  // De frontend tekent het icoon opnieuw bij elke wijziging van de update
+  await fetch(BASE + "/api/states/update.test_faalt", { method: "POST", headers: H, body: JSON.stringify({ state: "on", attributes: { ...(await st("update.test_faalt")).attributes, release_summary: "hertekenen" } }) });
+  await sleep(1000);
+  const tussen = await badgeBg();
+  await sleep(3000);
+  bgs = await badgeBg();
+  ok("Update icoon: blijft na hertekenen", bgs.length > 0 && bgs.every((b) => b.includes("/btechnics_branding/app-icon-192.png")), "tussen " + JSON.stringify(tussen) + " na " + JSON.stringify(bgs));
+  await page.screenshot({ path: process.env.SHOT || "/tmp/bt-updates.png", clip: { x: 256, y: 0, width: 1144, height: 500 } });
 
   const dry3 = await call(true);
   ok("Run 3: faalt niet meer geprobeerd", (dry3.zou_installeren || []).length === 0 && (dry3.overgeslagen || []).some((x) => /2 keer mislukt/.test(x)), JSON.stringify(dry3));

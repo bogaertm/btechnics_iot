@@ -21,6 +21,12 @@ class FakeUpdate(UpdateEntity):
         self._attr_supported_features = UpdateEntityFeature.INSTALL if installable else UpdateEntityFeature(0)
         self._fail = fail
 
+    @property
+    def entity_picture(self):
+        # Zoals HACS (custom_components/hacs/update.py): icoon van de brands CDN,
+        # waar Btechnics niet op staat -> "icon not available"
+        return "https://brands.home-assistant.io/_/btechnics_branding/icon.png"
+
     async def async_install(self, version, backup, **kwargs):
         if self._fail:
             raise HomeAssistantError("testfout: installatie mislukt")

@@ -318,20 +318,19 @@ function patchInlineLogos() {
     const p = el.path || el.getAttribute("path") || "";
     swapSvgForIcon(el, p.startsWith(HA_PATH_PREFIX));
   });
+  // v1.32.1: geen "al gedaan" vlag meer. De frontend hergebruikt deze elementen
+  // (lijst met updates, HACS) en zet de oude afbeelding terug; na onze vervanging
+  // matcht de regex niet meer, dus opnieuw nakijken kost niets.
   deepQuery(document, "img").forEach(img => {
-    if (!img.dataset.bt && HA_BRAND_RE.test(img.getAttribute("src") || "")) {
-      img.src = BT.icon;
-      img.dataset.bt = "1";
-    }
+    const src = img.getAttribute("src") || "";
+    if (HA_BRAND_RE.test(src) || OWN_BRAND_RE.test(src)) img.src = BT.icon;
   });
   // HACS update entiteit wijst naar brands.home-assistant.io/_/btechnics_branding
   // (bestaat niet op de CDN -> "icon not available"); state-badge gebruikt
   // een background-image, dus hier vervangen door het lokale icoon
   deepQuery(document, "state-badge").forEach(el => {
-    const bg = el.style.backgroundImage || "";
-    if (!el.dataset.bt && OWN_BRAND_RE.test(bg)) {
+    if (OWN_BRAND_RE.test(el.style.backgroundImage || "")) {
       el.style.backgroundImage = "url(" + BT.icon + ")";
-      el.dataset.bt = "1";
     }
   });
 }
@@ -511,7 +510,7 @@ function patchAllInner() {
 // Wat voor onze vervanging in die cache belandde, bleef het HA huisje tonen,
 // ook al geeft de server nu het Btechnics logo. Eenmaal per versie halen we die
 // items uit alle caches; de service worker haalt ze dan opnieuw bij de server.
-const BT_VERSION = "1.29.0";
+const BT_VERSION = "1.32.1";
 const HA_CACHED_RE = new RegExp(
   "/static/(icons/(favicon|mask-icon|apple-touch-icon|maskable_icon|tile-win|logo_ohf|ohf)" +
   "|images/(home-assistant-logo|notification-badge|ohf-badge|open-home-foundation))" +

@@ -172,6 +172,10 @@ def _managed(state, kind: str, options: dict) -> bool:
     features = int(state.attributes.get("supported_features", 0) or 0)
     if not features & _FEATURE_INSTALL:
         return False
+    if kind == "core" and not _VERSION_RE.match(str(state.attributes.get("latest_version") or "").strip()):
+        # v1.32.1: beta, rc of dev installeren we nooit, dus ook niet verbergen.
+        # Een .0 blijft wel verborgen: die wordt de .1 en gaat dan automatisch.
+        return False
     return _category(kind) in set(options.get(CONF_CATEGORIES, DEFAULT_CATEGORIES))
 
 
@@ -321,6 +325,11 @@ def async_sync_visibility(hass: HomeAssistant, options: dict, only: str | None =
         eid = state.entity_id
         entry = reg.async_get(eid)
         if entry is None:
+            continue
+        if state.state not in ("on", "off"):
+            # v1.32.1: bij het opstarten en tijdens een herstart zijn update
+            # entiteiten even unavailable of unknown. Dan niets aanraken: anders
+            # telden de mislukte pogingen terug vanaf 0 en kwam alles even tevoorschijn.
             continue
         kind = _kind(entry)
         latest = state.attributes.get("latest_version")
