@@ -42,6 +42,10 @@
     "hooks_broken": {
       "title": "Btechnics IOT: branding partly inactive after update",
       "description": "After updating to version {ha_version} these parts of the Btechnics IOT branding no longer work: {problems}.\n\nThe system itself keeps working; the original logo or name may be visible in those places. Update Btechnics IOT Features via HACS once a new version is available, or contact Btechnics."
+    },
+    "update_failed": {
+      "title": "Update {name} fails to install automatically",
+      "description": "The automatic update of {name} to version {version} failed {attempts} times. It will no longer be retried automatically and is visible again under Settings.\n\nInstall it manually or contact Btechnics. When a newer version is released, automatic updates will try again."
     }
   },
   "selector": {

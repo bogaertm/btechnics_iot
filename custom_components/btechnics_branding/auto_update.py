@@ -12,6 +12,20 @@ Regels (afgesproken met Btechnics):
 - Geen updates zolang de zelfcontrole een probleem met de branding meldt.
 - Core en OS herstarten het systeem; daarom hoogstens een van beide per nacht,
   als laatste stap. Wat daarna nog openstaat, volgt de volgende nacht.
+
+Meldingen verbergen (v1.32.0):
+- Een update die wij 's nachts zelf installeren, hoeft de klant niet te zien.
+  Zolang ze openstaat, verbergen we de update entiteit in het entiteitenregister
+  (hidden_by=integration). De frontend telt verborgen update entiteiten niet mee
+  in het bolletje van Instellingen in de zijbalk en toont ze niet bovenaan
+  Instellingen (frontend src/components/ha-sidebar.ts _calculateCounts en
+  src/panels/config/dashboard/ha-config-dashboard.ts).
+- Per entiteit en per versie tellen we de pogingen. Na 2 mislukte pogingen voor
+  dezelfde versie proberen we niet meer, wordt de update weer zichtbaar en komt
+  er een melding onder Reparaties. Een nieuwere versie begint opnieuw bij 0.
+- Enkel wat wij zelf verborgen hebben, maken we weer zichtbaar. Wat de gebruiker
+  verbergt (hidden_by=user), blijft van hem.
+- Automatische updates uit, of de integratie weg: alles wordt weer zichtbaar.
 """
 from __future__ import annotations
 
@@ -21,10 +35,12 @@ import re
 from datetime import datetime, time as dtime
 from typing import Any
 
-from homeassistant.core import HomeAssistant, ServiceCall, callback
+from homeassistant.const import EVENT_STATE_CHANGED
+from homeassistant.core import Event, HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.event import async_track_time_change
+from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
 _LOGGER = logging.getLogger(__name__)
@@ -45,6 +61,10 @@ _FEATURE_INSTALL = 1  # UpdateEntityFeature.INSTALL
 _FEATURE_BACKUP = 8  # UpdateEntityFeature.BACKUP
 _DATA_UNSUB = "btechnics_branding_update_unsub"
 _DATA_LAST = "btechnics_branding_update_last"
+_DATA_TRACKER = "btechnics_branding_update_tracker"
+_DATA_VIS_UNSUB = "btechnics_branding_update_vis_unsub"
+MAX_ATTEMPTS = 2
+FAILED_ISSUE_PREFIX = "update_failed_"
 _INSTALL_TIMEOUT = 45 * 60  # een app of Core update mag lang duren
 
 # Volgorde binnen een nacht. Core en OS staan achteraan: die herstarten.
@@ -99,6 +119,62 @@ def _parse_time(value: Any) -> dtime:
         return dtime(4, 0)
 
 
+class Tracker:
+    """Pogingen per update en welke entiteiten wij verborgen hebben (blijft bewaard)."""
+
+    def __init__(self, hass: HomeAssistant) -> None:
+        self._store: Store[dict] = Store(hass, 1, f"{DOMAIN}.auto_update")
+        self.attempts: dict[str, dict] = {}
+        self.hidden: set[str] = set()
+
+    async def async_load(self) -> None:
+        data = await self._store.async_load() or {}
+        self.attempts = data.get("attempts", {})
+        self.hidden = set(data.get("hidden", []))
+
+    def _save(self) -> None:
+        self._store.async_delay_save(
+            lambda: {"attempts": self.attempts, "hidden": sorted(self.hidden)}, 2
+        )
+
+    def count(self, entity_id: str, version: str | None) -> int:
+        a = self.attempts.get(entity_id)
+        return a["count"] if a and a.get("version") == version else 0
+
+    def add_attempt(self, entity_id: str, version: str | None) -> int:
+        n = self.count(entity_id, version) + 1
+        self.attempts[entity_id] = {"version": version, "count": n,
+                                    "last": dt_util.utcnow().isoformat()}
+        self._save()
+        return n
+
+    def reset(self, entity_id: str) -> None:
+        if self.attempts.pop(entity_id, None) is not None:
+            self._save()
+
+    def set_hidden(self, entity_id: str, hidden: bool) -> None:
+        if hidden and entity_id not in self.hidden:
+            self.hidden.add(entity_id)
+            self._save()
+        elif not hidden and entity_id in self.hidden:
+            self.hidden.discard(entity_id)
+            self._save()
+
+
+def _tracker(hass: HomeAssistant) -> Tracker | None:
+    return hass.data.get(_DATA_TRACKER)
+
+
+def _managed(state, kind: str, options: dict) -> bool:
+    """Valt deze update onder de automatische updates?"""
+    if not options.get(CONF_ENABLED, False):
+        return False
+    features = int(state.attributes.get("supported_features", 0) or 0)
+    if not features & _FEATURE_INSTALL:
+        return False
+    return _category(kind) in set(options.get(CONF_CATEGORIES, DEFAULT_CATEGORIES))
+
+
 def plan(hass: HomeAssistant, options: dict) -> tuple[list[dict], list[str]]:
     """Welke updates staan klaar en in welke volgorde. Geeft (plan, overgeslagen)."""
     categories = set(options.get(CONF_CATEGORIES, DEFAULT_CATEGORIES))
@@ -121,6 +197,10 @@ def plan(hass: HomeAssistant, options: dict) -> tuple[list[dict], list[str]]:
             if not allowed:
                 skipped.append(f"{name}: {why}")
                 continue
+        tracker = _tracker(hass)
+        if tracker and tracker.count(state.entity_id, latest) >= MAX_ATTEMPTS:
+            skipped.append(f"{name} {latest}: {MAX_ATTEMPTS} keer mislukt, wacht op manuele actie")
+            continue
         todo.append({
             "entity_id": state.entity_id,
             "kind": kind,
@@ -187,16 +267,29 @@ async def async_run(hass: HomeAssistant, options: dict, trigger: str = "schema")
         if upd["kind"] in ("core", "os"):
             # Vanaf hier herstart het systeem; eerst loggen wat al gebeurd is.
             _log(hass, "gestart: " + label + (" (met back-up)" if data.get("backup") else ""))
+        tracker = _tracker(hass)
+        if tracker:
+            tracker.add_attempt(upd["entity_id"], upd["to"])
         try:
             async with asyncio.timeout(_INSTALL_TIMEOUT):
                 await hass.services.async_call("update", "install", data, blocking=True)
-            result["installed"].append(label)
+            st = hass.states.get(upd["entity_id"])
+            if st is None or st.state == "off" or st.attributes.get("installed_version") == upd["to"]:
+                result["installed"].append(label)
+                if tracker:
+                    tracker.reset(upd["entity_id"])
+            elif upd["kind"] in ("core", "os", "supervisor"):
+                # Herstart volgt; of het gelukt is, zien we na de herstart.
+                result["installed"].append(label + " (bevestiging na herstart)")
+            else:
+                result["failed"].append(f"{label}: na installatie nog altijd {st.attributes.get('installed_version')}")
             if upd["kind"] == "hacs":
                 hacs_done = True
         except Exception as err:  # noqa: BLE001
             result["failed"].append(f"{label}: {err}")
             _LOGGER.warning("BT auto-update: %s mislukt: %s", label, err)
 
+    async_sync_visibility(hass, options)
     summary = []
     if result["installed"]:
         summary.append("geinstalleerd: " + "; ".join(result["installed"]))
@@ -211,6 +304,113 @@ async def async_run(hass: HomeAssistant, options: dict, trigger: str = "schema")
         _log(hass, "herstart na HACS updates")
         await hass.services.async_call("homeassistant", "restart", {}, blocking=False)
     return result
+
+
+@callback
+def async_sync_visibility(hass: HomeAssistant, options: dict, only: str | None = None) -> None:
+    """Verberg openstaande updates die wij afhandelen; toon ze na 2 mislukte pogingen."""
+    tracker = _tracker(hass)
+    if tracker is None:
+        return
+    reg = er.async_get(hass)
+    issues = ir.async_get(hass)
+    states = [hass.states.get(only)] if only else hass.states.async_all("update")
+    for state in states:
+        if state is None:
+            continue
+        eid = state.entity_id
+        entry = reg.async_get(eid)
+        if entry is None:
+            continue
+        kind = _kind(entry)
+        latest = state.attributes.get("latest_version")
+        pending = state.state == "on"
+        if not pending:
+            tracker.reset(eid)
+        failed = pending and tracker.count(eid, latest) >= MAX_ATTEMPTS
+        hide = pending and not failed and _managed(state, kind, options)
+
+        if hide and entry.hidden_by is None:
+            reg.async_update_entity(eid, hidden_by=er.RegistryEntryHider.INTEGRATION)
+            tracker.set_hidden(eid, True)
+        elif not hide and eid in tracker.hidden:
+            if entry.hidden_by == er.RegistryEntryHider.INTEGRATION:
+                reg.async_update_entity(eid, hidden_by=None)
+            tracker.set_hidden(eid, False)
+
+        issue_id = FAILED_ISSUE_PREFIX + eid
+        if failed and _managed(state, kind, options):
+            if issues.async_get_issue(DOMAIN, issue_id) is None:
+                name = str(state.attributes.get("title") or state.attributes.get("friendly_name") or eid)
+                _log(hass, f"{name} {latest}: {MAX_ATTEMPTS} keer mislukt, weer zichtbaar in de zijbalk")
+            ir.async_create_issue(
+                hass, DOMAIN, issue_id,
+                is_fixable=False, is_persistent=False,
+                severity=ir.IssueSeverity.WARNING,
+                translation_key="update_failed",
+                translation_placeholders={
+                    "name": str(state.attributes.get("title") or state.attributes.get("friendly_name") or eid),
+                    "version": str(latest),
+                    "attempts": str(MAX_ATTEMPTS),
+                },
+            )
+        elif issues.async_get_issue(DOMAIN, issue_id) is not None:
+            ir.async_delete_issue(hass, DOMAIN, issue_id)
+
+
+@callback
+def _async_unhide_all(hass: HomeAssistant) -> None:
+    tracker = _tracker(hass)
+    if tracker is None:
+        return
+    reg = er.async_get(hass)
+    for eid in list(tracker.hidden):
+        entry = reg.async_get(eid)
+        if entry and entry.hidden_by == er.RegistryEntryHider.INTEGRATION:
+            reg.async_update_entity(eid, hidden_by=None)
+        tracker.set_hidden(eid, False)
+    for issue_id in list(ir.async_get(hass).issues):
+        if issue_id[0] == DOMAIN and issue_id[1].startswith(FAILED_ISSUE_PREFIX):
+            ir.async_delete_issue(hass, DOMAIN, issue_id[1])
+
+
+async def async_setup_visibility(hass: HomeAssistant, get_options) -> None:
+    """Tracker laden en luisteren naar update entiteiten."""
+    if _DATA_TRACKER not in hass.data:
+        tracker = Tracker(hass)
+        await tracker.async_load()
+        hass.data[_DATA_TRACKER] = tracker
+    if unsub := hass.data.pop(_DATA_VIS_UNSUB, None):
+        unsub()
+
+    @callback
+    def _filter(event_data) -> bool:
+        return str(event_data.get("entity_id", "")).startswith("update.")
+
+    @callback
+    def _changed(event: Event) -> None:
+        async_sync_visibility(hass, get_options(), event.data.get("entity_id"))
+
+    hass.data[_DATA_VIS_UNSUB] = hass.bus.async_listen(
+        EVENT_STATE_CHANGED, _changed, event_filter=_filter
+    )
+    apply_options(hass, get_options())
+
+
+@callback
+def apply_options(hass: HomeAssistant, options: dict) -> None:
+    """Na het wijzigen van de opties: verbergen of alles weer tonen."""
+    if options.get(CONF_ENABLED, False):
+        async_sync_visibility(hass, options)
+    else:
+        _async_unhide_all(hass)
+
+
+@callback
+def async_teardown_visibility(hass: HomeAssistant) -> None:
+    if unsub := hass.data.pop(_DATA_VIS_UNSUB, None):
+        unsub()
+    _async_unhide_all(hass)
 
 
 @callback

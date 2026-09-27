@@ -1,4 +1,10 @@
-"""Btechnics IOT Branding v1.31.0.
+"""Btechnics IOT Branding v1.32.0.
+
+v1.32.0:
+- Updates die automatisch 's nachts geinstalleerd worden, zijn niet meer
+  zichtbaar in de zijbalk en bovenaan Instellingen. Na 2 mislukte pogingen voor
+  dezelfde versie komt de update weer tevoorschijn, met een melding onder
+  Reparaties. Details in auto_update.py.
 
 v1.31.0:
 - Automatische updates, instelbaar in de opties: elke nacht op een gekozen uur
@@ -684,21 +690,24 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
 
     auto_update.register_services(hass, lambda: dict(entry.options))
     auto_update.async_schedule(hass, dict(entry.options))
+    await auto_update.async_setup_visibility(hass, lambda: dict(entry.options))
 
     if hass.is_running:
         hass.async_create_task(_delayed())
     else:
         hass.bus.async_listen_once("homeassistant_started", _delayed)
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    _LOGGER.info("BT: v1.31.0 klaar")
+    _LOGGER.info("BT: v1.32.0 klaar")
     return True
 
 
 async def async_update_listener(hass: HomeAssistant, entry) -> None:
     # Geen herlaad (de views en routes zijn al geregistreerd); enkel herplannen.
     auto_update.async_schedule(hass, dict(entry.options))
+    auto_update.apply_options(hass, dict(entry.options))
 
 
 async def async_unload_entry(hass: HomeAssistant, entry) -> bool:
     auto_update.async_unschedule(hass)
+    auto_update.async_teardown_visibility(hass)
     return True

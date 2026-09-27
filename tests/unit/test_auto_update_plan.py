@@ -54,7 +54,7 @@ class Reg:
 
 
 def run(states, options):
-    hass = types.SimpleNamespace(states=types.SimpleNamespace(async_all=lambda d: states))
+    hass = types.SimpleNamespace(data={}, states=types.SimpleNamespace(async_all=lambda d: states))
     with patch.object(au.er, "async_get", lambda h: Reg()):
         return au.plan(hass, options)
 

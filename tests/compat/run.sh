@@ -7,13 +7,15 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 WORK="$(mktemp -d)"
 mkdir -p "$WORK/config/custom_components"
 cp -r "$ROOT/custom_components/btechnics_branding" "$WORK/config/custom_components/"
+cp -r "$ROOT/tests/compat/fake_update/bt_fake" "$WORK/config/custom_components/"
 cat > "$WORK/config/configuration.yaml" <<'YAML'
 default_config:
-demo:
+update:
+  - platform: bt_fake
 logger:
   default: warning
 YAML
-[ "${KEEP:-0}" = 1 ] || docker rm -f bt-ha >/dev/null 2>&1 || true
+docker rm -f bt-ha >/dev/null 2>&1 || true
 docker run -d --name bt-ha -p 8123:8123 -v "$WORK/config:/config" \
   "ghcr.io/home-assistant/home-assistant:${TAG}" >/dev/null
 echo "HA ${TAG} gestart, config in ${WORK}"

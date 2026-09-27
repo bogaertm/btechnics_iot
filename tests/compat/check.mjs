@@ -192,45 +192,75 @@ const na2 = await listBt();
 ok("Zelfcontrole maakt en wist melding", na1 === 1 && na2 === 0, `${na1} -> ${na2}`);
 const anon = await fetch(BASE + "/api/btechnics_branding/health", { method: "POST", body: "{}" });
 ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
-await browser.close();
 
 // ---------------------------------------------------------------- automatische updates
+// Testentiteiten (tests/compat/fake_update): update.test_ok slaagt,
+// update.test_faalt mislukt altijd, update.test_enkel_melding kan niet installeren.
 {
   const entries = await (await fetch(BASE + "/api/config/config_entries/entry", { headers: H })).json();
   const entry = entries.find((e) => e.domain === "btechnics_branding");
-  let f = await (await fetch(BASE + "/api/config/config_entries/options/flow", { method: "POST", headers: H, body: JSON.stringify({ handler: entry.entry_id }) })).json();
-  const fields = (f.data_schema || []).map((x) => x.name);
+  const setOpts = async (o) => {
+    let f = await (await fetch(BASE + "/api/config/config_entries/options/flow", { method: "POST", headers: H, body: JSON.stringify({ handler: entry.entry_id }) })).json();
+    const fields = (f.data_schema || []).map((x) => x.name);
+    f = await (await fetch(BASE + "/api/config/config_entries/options/flow/" + f.flow_id, { method: "POST", headers: H, body: JSON.stringify(o) })).json();
+    return { f, fields };
+  };
+  const ALLES = { auto_update: true, auto_update_time: "04:00:00", auto_update_categories: ["system", "addons", "hacs", "firmware"], auto_update_backup: true };
+  const { f, fields } = await setOpts(ALLES);
   ok("Opties tonen automatische updates", ["auto_update", "auto_update_time", "auto_update_categories", "auto_update_backup"].every((n) => fields.includes(n)), fields.join(","));
-  f = await (await fetch(BASE + "/api/config/config_entries/options/flow/" + f.flow_id, { method: "POST", headers: H,
-    body: JSON.stringify({ auto_update: true, auto_update_time: "04:00:00", auto_update_categories: ["system", "addons", "hacs", "firmware"], auto_update_backup: true }) })).json();
-  ok("Opties bewaren", f.type === "create_entry", f.type + " " + JSON.stringify(f.errors || ""));
+  ok("Opties bewaren", f.type === "create_entry", f.type);
+  await sleep(2000);
 
-  const states = await (await fetch(BASE + "/api/states", { headers: H })).json();
-  const avail = states.filter((s) => s.entity_id.startsWith("update.") && s.state === "on" && (s.attributes.supported_features & 1)).map((s) => s.entity_id);
-  const call = async (dry) => (await fetch(BASE + "/api/services/btechnics_branding/run_updates?return_response", { method: "POST", headers: H, body: JSON.stringify({ dry_run: dry }) })).json();
+  const ws = (msg) => page.evaluate((m) => document.querySelector("home-assistant").hass.callWS(m), msg);
+  const reg = async (eid) => (await ws({ type: "config/entity_registry/get", entity_id: eid }));
+  const st = async (eid) => (await fetch(BASE + "/api/states/" + eid, { headers: H })).json();
+  const issues = async () => (await ws({ type: "repairs/list_issues" })).issues.filter((i) => i.domain === "btechnics_branding").map((i) => i.issue_id);
+  const badge = () => page.evaluate(() => {
+    const sb = document.querySelector("home-assistant").shadowRoot.querySelector("home-assistant-main").shadowRoot.querySelector("ha-sidebar");
+    return sb._updatesCount;
+  });
+  const call = async (dry) => (await (await fetch(BASE + "/api/services/btechnics_branding/run_updates?return_response", { method: "POST", headers: H, body: JSON.stringify({ dry_run: dry }) })).json()).service_response || {};
+
+  ok("Verborgen: update die slaagt", (await reg("update.test_ok")).hidden_by === "integration");
+  ok("Verborgen: update die faalt", (await reg("update.test_faalt")).hidden_by === "integration");
+  ok("Niet verborgen: enkel melding (kan niet installeren)", (await reg("update.test_enkel_melding")).hidden_by === null);
+  await page.goto(BASE + "/config/dashboard"); await sleep(8000);
+  // HA telt enkel installeerbare updates; zonder verbergen zou dit 2 zijn (ok + faalt)
+  ok("Zijbalk toont geen automatische updates", (await badge()) === 0, String(await badge()));
+
   const dry = await call(true);
-  const plan = dry.service_response || {};
-  ok("Dry run toont plan", Array.isArray(plan.zou_installeren) && plan.zou_installeren.length === avail.length, `${(plan.zou_installeren || []).length} van ${avail.length} beschikbaar`);
-  const still1 = (await (await fetch(BASE + "/api/states", { headers: H })).json()).filter((s) => s.entity_id.startsWith("update.") && s.state === "on" && (s.attributes.supported_features & 1)).length;
-  ok("Dry run installeert niets", still1 === avail.length, String(still1));
+  ok("Dry run toont plan", (dry.zou_installeren || []).length === 2, JSON.stringify(dry.zou_installeren));
 
-  const real = (await call(false)).service_response || {};
-  ok("Run start op de achtergrond", Array.isArray(real.gestart) && real.gestart.length === plan.zou_installeren.length, String((real.gestart || []).length));
-  // Een update na de andere; de demo met 1000 stappen doet er zelf minuten over.
-  // Geslaagd als alles geinstalleerd is of nog bezig is (in_progress).
-  let open = avail.length, busy = 0;
-  for (let i = 0; i < 36; i++) {
-    await sleep(5000);
-    const st = (await (await fetch(BASE + "/api/states", { headers: H })).json()).filter((s) => avail.includes(s.entity_id) && s.state === "on");
-    busy = st.filter((s) => s.attributes.in_progress).length;
-    open = st.length - busy;
-    if (open === 0) break;
-  }
-  ok("Echte run installeert alles wat kan", open === 0, `niet gestart: ${open}, bezig: ${busy}`);
+  await call(false); await sleep(4000);
+  ok("Run 1: test_ok geinstalleerd", (await st("update.test_ok")).state === "off");
+  ok("Run 1: test_ok weer gewoon zichtbaar (niets meer open)", (await reg("update.test_ok")).hidden_by === null);
+  ok("Run 1: test_faalt nog verborgen na 1 poging", (await reg("update.test_faalt")).hidden_by === "integration");
+  ok("Run 1: nog geen melding", !(await issues()).some((i) => i.startsWith("update_failed_")));
+
+  await call(false); await sleep(4000);
+  ok("Run 2: test_faalt zichtbaar na 2 pogingen", (await reg("update.test_faalt")).hidden_by === null);
+  ok("Run 2: melding onder Reparaties", (await issues()).includes("update_failed_update.test_faalt"), (await issues()).join(","));
+  await page.goto(BASE + "/config/dashboard"); await sleep(8000);
+  ok("Zijbalk toont de mislukte update", (await badge()) === 1, String(await badge()));
+
+  const dry3 = await call(true);
+  ok("Run 3: faalt niet meer geprobeerd", (dry3.zou_installeren || []).length === 0 && (dry3.overgeslagen || []).some((x) => /2 keer mislukt/.test(x)), JSON.stringify(dry3));
+
+  // Gebruiker verbergt zelf: blijft van hem
+  await ws({ type: "config/entity_registry/update", entity_id: "update.test_enkel_melding", hidden_by: "user" });
+  // Uitzetten: alles wat wij verborgen, komt terug; meldingen weg
+  await setOpts({ ...ALLES, auto_update: false }); await sleep(2000);
+  ok("Uit: melding weg", !(await issues()).some((i) => i.startsWith("update_failed_")));
+  ok("Uit: verborgen door gebruiker blijft verborgen", (await reg("update.test_enkel_melding")).hidden_by === "user");
+
+  // Weer aan: test_faalt blijft zichtbaar (zelfde versie, 2 pogingen onthouden)
+  await setOpts(ALLES); await sleep(2000);
+  ok("Aan: 2 mislukte pogingen onthouden", (await reg("update.test_faalt")).hidden_by === null);
+
   // Stoppen bij een branding probleem
   await fetch(BASE + "/api/btechnics_branding/health", { method: "POST", headers: H, body: JSON.stringify({ problems: ["sidebar"] }) });
-  const stopped = (await call(true)).service_response || {};
-  ok("Stopt bij probleem met branding", stopped.branding_probleem === true, JSON.stringify(stopped).slice(0, 80));
+  const stopped = await call(true);
+  ok("Stopt bij probleem met branding", stopped.branding_probleem === true);
   await fetch(BASE + "/api/btechnics_branding/health", { method: "POST", headers: H, body: JSON.stringify({ problems: [] }) });
 }
 
@@ -252,6 +282,8 @@ await browser.close();
   }
   ok("Start zelf op het ingestelde uur", !!last && last.trigger === "schema", `${hhmm} ${cfg.time_zone} -> ${last ? last.trigger + " " + last.started : "niets"}`);
 }
+
+await browser.close();
 
 // ---------------------------------------------------------------- resultaat
 const fails = results.filter((x) => !x.pass);

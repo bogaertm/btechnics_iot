@@ -40,6 +40,7 @@ In de opties staat **Automatische updates** (standaard uit). Aan betekent: elke 
 - Core en OS herstarten het systeem, dus hoogstens een van beide per nacht. Na HACS updates volgt een herstart.
 - Een update die je zelf overslaat, wordt nooit automatisch geinstalleerd.
 - Wat er gebeurd is, staat in Activiteit onder "Btechnics IOT updates".
+- Updates die automatisch geinstalleerd worden, zijn verborgen: geen bolletje in de zijbalk en niet bovenaan Instellingen. Mislukt dezelfde versie 2 keer, dan wordt ze niet meer geprobeerd, komt ze weer tevoorschijn en verschijnt er een melding onder Reparaties. Updates die niet automatisch kunnen, blijven altijd zichtbaar.
 
 Service `btechnics_branding.run_updates` start het meteen; met `dry_run: true` zie je enkel wat er zou gebeuren.
 
