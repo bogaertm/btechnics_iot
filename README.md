@@ -54,6 +54,25 @@ Service `btechnics_branding.send_status` verstuurt meteen en toont wat er verstu
 
 Met een sleutel ingevuld en **Bediening op afstand door Btechnics** aan (standaard aan), haalt de installatie elke minuut opdrachten op bij de Work-app. Er hoeft geen poort open. Enkel deze opdrachten bestaan: automatische updates aan/uit en instellen, de run nu starten (of enkel tonen), een update installeren, overslaan of terugzetten, mislukte pogingen wissen en de status meteen versturen. Al de rest wordt geweigerd. Alles komt in Activiteit onder "Btechnics IOT updates".
 
+### Herstart, meldingen en gebruikers (v1.35.0)
+
+- **Herstart op afstand:** HA herstarten (eerst configuratiecontrole) of het toestel herstarten (HA OS). Na een HACS update op afstand volgt automatisch een herstart; de nachtelijke run herstartte al na HACS updates.
+- **Meldingenlog:** de status bevat de eigen gebeurtenissen, reparaties, meldingen en de laatste fouten uit het systeemlog. Sleutels, wachtwoorden, tokens en IP-adressen worden gemaskeerd.
+- **Gebruikersbeheer op afstand** (standaard uit, per klant aan te zetten): overzicht, aanmaken, rechten, wachtwoord resetten, afmelden, verwijderen. De eigenaar is onaantastbaar, er blijft altijd een beheerder, en elke actie geeft een melding in HA.
+
+### Desktop-apps
+
+De status bevat `desktop_apps`: de Btechnics IOT desktop-apps (Mac en Windows) die met deze installatie verbonden zijn.
+- Uit de toegangstokens met "Btechnics IOT" in de naam (laatst gebruikt en vanaf welk adres). Het token zelf gaat nooit mee.
+- Vanaf app-versie 3.8.0 meldt de app zich zelf aan via `btechnics_branding.register_desktop_app` (computernaam, versie, platform). Heeft die gebruiker precies een Btechnics IOT token, dan vervangt de app-regel de token-regel. 30 dagen zonder aanmelding en de app wordt vergeten.
+
+### Veiligheid
+
+- Opdrachten hebben een vervaldatum en worden nooit twee keer uitgevoerd, ook niet na een herstart.
+- Geen redirects, antwoord hoogstens 256 kB, enkel https (lokaal adres mag http), ja/nee velden strikt.
+- De sleutel gaat niet meer naar de browser (leeg laten = ongewijzigd, wissen met een vinkje).
+- Diagnose bevat geen gebruikers, adres of logs.
+
 ## Woordkeuze
 
 In het Nederlands spreekt Home Assistant van "woning", "je huis" en "Welkom thuis". Btechnics IOT maakt daar neutrale woorden van, voor woningen en bedrijven: "Algemeen" in plaats van "Woninginformatie", "Locatienaam", "je locatie", "Welkom!". Andere talen blijven ongemoeid.

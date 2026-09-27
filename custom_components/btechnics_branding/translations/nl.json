@@ -31,8 +31,10 @@
           "auto_update_categories": "Wat mag automatisch bijgewerkt worden",
           "auto_update_backup": "Back-up voor elke update",
           "status_url": "Adres voor de status naar Btechnics",
-          "status_token": "Sleutel van deze klant (uit de Work-app)",
-          "remote_control": "Bediening op afstand door Btechnics (updates beheren)"
+          "status_token": "Sleutel van deze klant (leeg laten = ongewijzigd)",
+          "remote_control": "Bediening op afstand door Btechnics (updates beheren)",
+          "remote_users": "Gebruikersbeheer op afstand door Btechnics",
+          "status_token_remove": "Sleutel wissen (status en bediening op afstand stoppen)"
         },
         "description": "Huidig klantenlogo: {customer_logo_status}\n\nStatus naar Btechnics: vul de sleutel van deze klant in. Zonder sleutel wordt niets verstuurd."
       }
@@ -76,6 +78,36 @@
     "send_status": {
       "name": "Status naar Btechnics versturen",
       "description": "Verstuurt meteen de status van deze installatie naar Btechnics en toont wat er verstuurd werd."
+    },
+    "register_desktop_app": {
+      "name": "Desktop-app aanmelden",
+      "description": "Wordt door de Btechnics IOT desktop-app opgeroepen bij het opstarten en elk uur.",
+      "fields": {
+        "app_id": {
+          "name": "App-id",
+          "description": "Vast per installatie."
+        },
+        "naam": {
+          "name": "Naam",
+          "description": "Computernaam."
+        },
+        "app_versie": {
+          "name": "App-versie",
+          "description": "Bv. 3.8.0."
+        },
+        "platform": {
+          "name": "Platform",
+          "description": "macos of windows."
+        },
+        "os_versie": {
+          "name": "OS-versie",
+          "description": "Bv. 15.6."
+        },
+        "architectuur": {
+          "name": "Architectuur",
+          "description": "arm64 of x64."
+        }
+      }
     }
   }
 }

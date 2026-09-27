@@ -121,7 +121,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
 
-from . import auto_update, remote, status
+from . import auto_update, desktop, remote, status
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 _LOGGER = logging.getLogger(__name__)
@@ -206,10 +206,11 @@ _TR_SCRIPT = (
     "<script>(function(){var K=" + json.dumps(_TR_KEYS, ensure_ascii=False)
     + ",R=" + json.dumps(_TR_RULES)
     + ".map(function(x){return [new RegExp(x[0],'g'),x[1]]});"
-    "var M=/\\/static\\/translations\\/(?:[\\w-]+\\/)?nl-[0-9a-f]+\\.json/;"
+    "var M=/^\\/static\\/translations\\/(?:[\\w-]+\\/)?nl-[0-9a-f]+\\.json$/;"
     "var f=window.fetch;if(!f||f._bt)return;"
     "var w=function(i,o){var u=typeof i==='string'?i:(i&&i.url)||'';"
-    "var p=f.apply(window,arguments);if(!M.test(u))return p;"
+    "var p=f.apply(window,arguments);var a;try{a=new URL(u,location.href)}catch(e){return p}"
+    "if(a.origin!==location.origin||!M.test(a.pathname))return p;"
     "return p.then(function(r){if(!r.ok)return r;return r.clone().json().then(function(d){"
     "for(var k in d){var v=d[k];if(typeof v!=='string')continue;"
     "if(K.hasOwnProperty(k)){d[k]=K[k];continue}"
@@ -682,8 +683,10 @@ class BtechnicsBrandingHealthView(HomeAssistantView):
             data = await request.json()
         except ValueError:
             return web.Response(status=400)
+        if not isinstance(data, dict) or not isinstance(data.get("problems", []), list):
+            return web.Response(status=400)
         allowed = {"sidebar", "systemdata", "launch"}
-        found = {p for p in data.get("problems", []) if p in allowed}
+        found = {p for p in data.get("problems", []) if isinstance(p, str) and p in allowed}
         state = _health(self.hass)
         if found != state["frontend"]:
             state["frontend"] = found
@@ -737,13 +740,14 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
     status.register_services(hass, lambda: dict(entry.options))
     await status.async_setup(hass, lambda: dict(entry.options))
     await remote.async_setup(hass, entry)
+    await desktop.async_setup(hass)
 
     if hass.is_running:
         hass.async_create_task(_delayed())
     else:
         hass.bus.async_listen_once("homeassistant_started", _delayed)
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    _LOGGER.info("BT: v1.34.0 klaar")
+    _LOGGER.info("BT: v1.35.0 klaar")
     return True
 
 
@@ -759,6 +763,7 @@ async def async_unload_entry(hass: HomeAssistant, entry) -> bool:
     auto_update.async_teardown_visibility(hass)
     status.async_teardown(hass)
     remote.async_teardown(hass)
+    desktop.async_unload(hass)
     # v1.33.1: services weg, anders werken ze verder met de oude instellingen
     for service in ("run_updates", "send_status"):
         hass.services.async_remove(DOMAIN, service)
@@ -784,4 +789,6 @@ async def async_remove_entry(hass: HomeAssistant, entry) -> None:
     # het bestand niet opnieuw aanmaakt; tracker weg voor een latere herinstallatie
     tracker = hass.data.pop(auto_update._DATA_TRACKER, None)  # noqa: SLF001
     await (tracker._store if tracker else Store(hass, 1, f"{DOMAIN}.auto_update")).async_remove()  # noqa: SLF001
+    await remote.async_remove(hass)
+    await desktop.async_remove(hass)
     ir.async_delete_issue(hass, DOMAIN, _ISSUE_ID)

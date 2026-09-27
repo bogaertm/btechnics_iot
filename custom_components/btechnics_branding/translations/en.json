@@ -31,8 +31,10 @@
           "auto_update_categories": "What may be updated automatically",
           "auto_update_backup": "Back up before each update",
           "status_url": "Address for the status to Btechnics",
-          "status_token": "Key of this customer (from the Work app)",
-          "remote_control": "Remote management by Btechnics (manage updates)"
+          "status_token": "Key of this customer (leave empty = unchanged)",
+          "remote_control": "Remote management by Btechnics (manage updates)",
+          "remote_users": "Remote user management by Btechnics",
+          "status_token_remove": "Remove key (stop status and remote management)"
         },
         "description": "Current customer logo: {customer_logo_status}\n\nStatus to Btechnics: fill in the key of this customer. Without a key nothing is sent."
       }
@@ -76,6 +78,36 @@
     "send_status": {
       "name": "Send status to Btechnics",
       "description": "Sends the status of this installation to Btechnics right away and shows what was sent."
+    },
+    "register_desktop_app": {
+      "name": "Register desktop app",
+      "description": "Called by the Btechnics IOT desktop app at startup and every hour.",
+      "fields": {
+        "app_id": {
+          "name": "App id",
+          "description": "Fixed per installation."
+        },
+        "naam": {
+          "name": "Name",
+          "description": "Computer name."
+        },
+        "app_versie": {
+          "name": "App version",
+          "description": "E.g. 3.8.0."
+        },
+        "platform": {
+          "name": "Platform",
+          "description": "macos or windows."
+        },
+        "os_versie": {
+          "name": "OS version",
+          "description": "E.g. 15.6."
+        },
+        "architectuur": {
+          "name": "Architecture",
+          "description": "arm64 or x64."
+        }
+      }
     }
   }
 }

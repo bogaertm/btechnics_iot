@@ -8,13 +8,18 @@ alle klanten en de mail bij een probleem:
 - een klant waarvan al 24 uur niets meer binnenkwam (dat beslist de Work-app).
 
 Er wordt enkel iets verstuurd als er een sleutel is ingevuld bij de instellingen.
-Er gaan geen persoonsgegevens, wachtwoorden of toestelgegevens mee: enkel
-versies, de naam van de installatie en de stand van de updates.
+Wat meegaat (v1.35.0): naam en extern adres van de installatie, versies, stand
+van de branding en de updates, meldingen, reparaties en de laatste fouten uit
+het systeemlog, en (enkel met gebruikersbeheer op afstand aan) de gebruikers
+met naam, gebruikersnaam en rechten. Nooit wachtwoorden of de sleutel zelf.
+In teksten uit logs en meldingen worden sleutels, wachtwoorden, tokens en
+IP-adressen gemaskeerd en < > weggehaald (geen HTML naar de Work-app).
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from datetime import timedelta
 from typing import Any
 
@@ -43,6 +48,134 @@ _DATA = "btechnics_branding_status"
 
 def _state(hass: HomeAssistant) -> dict:
     return hass.data.setdefault(_DATA, {"unsubs": [], "pending": None, "last": None, "reasons": set()})
+
+
+# v1.35.0 (na hercontrole): enkel sleutel=waarde of sleutel: waarde, ook met
+# aanhalingstekens (dict/JSON in logs) en url-gecodeerd; losse woorden zoals
+# "Token expired" of "Error code 500" blijven leesbaar.
+_KEYS = (r"[\w-]*(?:password|passwd|passphrase|secret|token|api[_-]?key|apikey|private[_-]?key|"
+         r"auth[_-]?key|access[_-]?key)|pwd|pass|psk|pin|code|key|sig|signature|authorization")
+# sleutel=waarde / sleutel: waarde / "sleutel": "waarde met spaties" / url-gecodeerd
+_SECRET_QUOTED_RE = re.compile(r"""(?i)(["']?)\b(""" + _KEYS + r""")\1(\s*[=:]\s*)(["'])(.*?)\4""")
+_SECRET_RE = re.compile(r"""(?i)(["']?)\b(""" + _KEYS + r""")\1(\s*[=:]\s*|%3[dD])([^\s&,;"'}\]]+)""")
+_AUTH_LINE_RE = re.compile(r"(?i)\b(authorization)(\s*[=:]\s*)[^\n,;}\]]+")
+_BEARER_RE = re.compile(r"(?i)\b(bearer|basic)\s+[A-Za-z0-9._~+/=-]{6,}")
+_JWT_RE = re.compile(r"\beyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]*")
+_TELEGRAM_RE = re.compile(r"(?i)/bot\d{5,}:[A-Za-z0-9_-]{20,}")
+_WEBHOOK_RE = re.compile(r"(?i)(/api/webhook/|hooks\.slack\.com/services/|discord(?:app)?\.com/api/webhooks/)[^\s?\"'<>]+")
+_PREFIX_RE = re.compile(r"\b(?:gh[pousr]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|xox[abpr]-[A-Za-z0-9-]{10,}|"
+                        r"AKIA[0-9A-Z]{16}|sk-[A-Za-z0-9_-]{20,}|AIza[0-9A-Za-z_-]{30,})")
+_URL_CRED_RE = re.compile(r"(?i)(\w+://)[^/\s]*@")
+_PEM_RE = re.compile(r"-----BEGIN [A-Z ]+-----.*?(?:-----END [A-Z ]+-----|$)", re.S)
+_HEX_RE = re.compile(r"\b0x[0-9a-fA-F]{16,}\b|\b[0-9a-fA-F]{32,}\b")
+_EMAIL_RE = re.compile(r"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b")
+# Lange willekeurige reeksen met hoofdletters, kleine letters en cijfers (sleutels);
+# entity_id's en hex-id's (enkel kleine letters) blijven staan.
+_ENTROPY_RE = re.compile(r"\b(?=[A-Za-z0-9_-]*[A-Z])(?=[A-Za-z0-9_-]*[a-z])(?=[A-Za-z0-9_-]*\d)[A-Za-z0-9_-]{24,}\b")
+_IP4_RE = re.compile(r"\b(?:(?:25[0-5]|2[0-4]\d|1?\d?\d)\.){3}(?:25[0-5]|2[0-4]\d|1?\d?\d)\b")
+_IP6_RE = re.compile(r"(?i)\b(?:[0-9a-f]{1,4}:){4,7}[0-9a-f]{1,4}\b|\b(?:[0-9a-f]{1,4}:)+:(?:[0-9a-f]{1,4}:?)*\b")
+
+
+def _clean(text: Any) -> str:
+    """Geheimen, e-mail en IP-adressen maskeren, geen HTML doorgeven."""
+    text = str(text or "")
+    text = _PEM_RE.sub("-----***-----", text)
+    text = _URL_CRED_RE.sub(r"\1***@", text)
+    text = _HEX_RE.sub("***", text)
+    text = _WEBHOOK_RE.sub(r"\1***", text)
+    text = _TELEGRAM_RE.sub("/bot***", text)
+    text = _PREFIX_RE.sub("***", text)
+    text = _JWT_RE.sub("***", text)
+    text = _AUTH_LINE_RE.sub(r"\1\2***", text)
+    text = _BEARER_RE.sub(lambda m: f"{m.group(1)} ***", text)
+    text = _SECRET_QUOTED_RE.sub(lambda m: f"{m.group(1)}{m.group(2)}{m.group(1)}{m.group(3)}{m.group(4)}***{m.group(4)}", text)
+    text = _SECRET_RE.sub(lambda m: f"{m.group(1)}{m.group(2)}{m.group(1)}{m.group(3)}***", text)
+    text = _EMAIL_RE.sub("***@***", text)
+    text = _ENTROPY_RE.sub("***", text)
+    text = _IP4_RE.sub("x.x.x.x", text)
+    text = _IP6_RE.sub("x:x:x:x", text)
+    return _safe(text)
+
+
+def _deep(obj: Any) -> Any:
+    """_clean op alle teksten in een lijst of dict (bv. de laatste run)."""
+    if isinstance(obj, str):
+        return _clean(obj)
+    if isinstance(obj, list):
+        return [_deep(x) for x in obj]
+    if isinstance(obj, dict):
+        return {k: _deep(v) for k, v in obj.items()}
+    return obj
+
+
+def _safe(text: Any) -> str:
+    """Geen HTML naar de Work-app, ook niet in namen."""
+    if text is None:
+        return None
+    return str(text).replace("<", "‹").replace(">", "›")
+
+
+def _logs(hass: HomeAssistant) -> dict[str, Any]:
+    """v1.35.0: meldingen voor de Work-app. Kort gehouden: laatste items, ingekorte tekst."""
+    from homeassistant.helpers import issue_registry as ir
+
+    def cut(text: Any, n: int = 300) -> str:
+        text = _clean(text)
+        return text if len(text) <= n else text[: n - 1] + "…"
+
+    out: dict[str, Any] = {}
+    # Eigen gebeurtenissen: updates, op afstand, herstarts
+    out["btechnics"] = [{"at": e.get("at"), "message": cut(e.get("message"))}
+                         for e in list(hass.data.get("btechnics_branding_events", []))[-50:]]
+    # Reparaties (alle integraties), zoals onder Instellingen > Reparaties
+    repairs = []
+    for (domain, issue_id), issue in ir.async_get(hass).issues.items():
+        if not issue.active or issue.dismissed_version:
+            continue
+        repairs.append({
+            "domain": _safe(domain), "issue_id": _safe(issue_id),
+            "severity": str(issue.severity) if issue.severity else None,
+            "translation_key": issue.translation_key,
+            "placeholders": {k: cut(v, 120) for k, v in (issue.translation_placeholders or {}).items()},
+            "created": issue.created.isoformat() if issue.created else None,
+            "fixable": bool(issue.is_fixable),
+        })
+    out["repairs"] = repairs[:50]
+    # Meldingen (persistent notifications)
+    notes = []
+    try:
+        from homeassistant.components.persistent_notification import (
+            _async_get_or_create_notifications,
+        )
+        for n in _async_get_or_create_notifications(hass).values():
+            created = n.get("created_at")
+            notes.append({
+                "id": n.get("notification_id"), "title": cut(n.get("title"), 150),
+                "message": cut(n.get("message")),
+                "created": created.isoformat() if hasattr(created, "isoformat") else created,
+            })
+    except Exception:  # noqa: BLE001
+        pass
+    out["notifications"] = notes[-30:]
+    # Fouten en waarschuwingen uit het systeemlog
+    errors = []
+    try:
+        handler = hass.data.get("system_log")
+        for rec in handler.records.to_list() if handler else []:
+            if rec.get("level") not in ("ERROR", "CRITICAL", "WARNING"):
+                continue
+            msg = rec.get("message")
+            errors.append({
+                "level": rec.get("level"), "name": _safe(rec.get("name")),
+                "message": cut(msg[0] if isinstance(msg, list) and msg else msg),
+                "count": rec.get("count"), "last": rec.get("timestamp"),
+                "first": rec.get("first_occurred"),
+            })
+    except Exception:  # noqa: BLE001
+        pass
+    errors.sort(key=lambda e: e.get("last") or 0, reverse=True)
+    out["errors"] = errors[:30]
+    return out
 
 
 async def async_build(hass: HomeAssistant, options: dict, reason: str) -> dict[str, Any]:
@@ -88,9 +221,9 @@ async def async_build(hass: HomeAssistant, options: dict, reason: str) -> dict[s
             "installable": bool(feats & 1),
             "backup_supported": bool(feats & 8),
             "in_progress": bool(st.attributes.get("in_progress")),
-            "name": str(st.attributes.get("title") or st.attributes.get("friendly_name") or st.entity_id),
-            "installed": st.attributes.get("installed_version"),
-            "latest": latest,
+            "name": _safe(st.attributes.get("title") or st.attributes.get("friendly_name") or st.entity_id),
+            "installed": _safe(st.attributes.get("installed_version")),
+            "latest": _safe(latest),
             "kind": auto_update._kind(entry),  # noqa: SLF001
             "hidden": bool(entry and entry.hidden_by),
             "attempts": attempts,
@@ -99,15 +232,31 @@ async def async_build(hass: HomeAssistant, options: dict, reason: str) -> dict[s
 
     skipped_list = [
         {"entity_id": s.entity_id,
-         "name": str(s.attributes.get("title") or s.attributes.get("friendly_name") or s.entity_id),
-         "skipped_version": s.attributes.get("skipped_version")}
+         "name": _safe(s.attributes.get("title") or s.attributes.get("friendly_name") or s.entity_id),
+         "skipped_version": _safe(s.attributes.get("skipped_version"))}
         for s in hass.states.async_all("update") if s.attributes.get("skipped_version")
     ]
     last = hass.data.get("btechnics_branding_update_last")
+    from . import users
+    user_list = None
+    if options.get(users.CONF_REMOTE_USERS, False):
+        try:
+            user_list = [{**u, "name": _safe(u.get("name")), "username": _safe(u.get("username"))}
+                         for u in await users.async_list(hass)]
+        except Exception:  # noqa: BLE001
+            user_list = None
+    from . import desktop
+    try:
+        desktop_apps = [{**a, "naam": _safe(a.get("naam"))} for a in await desktop.async_list(hass)]
+    except Exception:  # noqa: BLE001
+        desktop_apps = None
     return {
+        "desktop_apps": desktop_apps,
+        "logs": _logs(hass),
+        "users": user_list,
         "schema": SCHEMA_VERSION,
         "instance_id": await instance_id.async_get(hass),
-        "name": hass.config.location_name,
+        "name": _safe(hass.config.location_name),
         "url": url,
         "reason": reason,
         "sent_at": dt_util.utcnow().isoformat(),
@@ -122,14 +271,15 @@ async def async_build(hass: HomeAssistant, options: dict, reason: str) -> dict[s
         # v1.34.0: bediening op afstand (remote.py)
         "remote": {
             "enabled": bool(options.get("remote_control", True)),
-            "last_poll": (hass.data.get("btechnics_branding_remote") or {}).get("last"),
+            "users": bool(options.get("remote_users", False)),
+            "last_poll": _deep((hass.data.get("btechnics_branding_remote") or {}).get("last")),
         },
         "auto_update": {
             "enabled": bool(options.get(auto_update.CONF_ENABLED, False)),
             "time": options.get(auto_update.CONF_TIME, auto_update.DEFAULT_TIME),
             "categories": list(options.get(auto_update.CONF_CATEGORIES, auto_update.DEFAULT_CATEGORIES)),
             "backup": bool(options.get(auto_update.CONF_BACKUP, True)),
-            "last_run": last,
+            "last_run": _deep(last),
         },
         "updates": {
             "pending": pending,
@@ -148,6 +298,11 @@ async def async_send(hass: HomeAssistant, options: dict, reason: str) -> dict[st
         result.update(ok=False, error="geen sleutel ingevuld")
         _state(hass)["last"] = result
         return result
+    from .config_flow import _status_url_ok
+    if not _status_url_ok(url):
+        result.update(ok=False, error="adres niet toegelaten (https verplicht)")
+        _state(hass)["last"] = result
+        return result
     payload = await async_build(hass, options, reason)
     try:
         session = async_get_clientsession(hass)
@@ -155,6 +310,7 @@ async def async_send(hass: HomeAssistant, options: dict, reason: str) -> dict[st
             async with session.post(
                 url, json=payload,
                 headers={"Authorization": f"Bearer {token}", "User-Agent": f"btechnics-iot/{payload['versions']['integration']}"},
+                allow_redirects=False,
             ) as resp:
                 result["http"] = resp.status
                 result["ok"] = 200 <= resp.status < 300

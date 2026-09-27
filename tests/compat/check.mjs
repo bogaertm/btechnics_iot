@@ -226,8 +226,9 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
     return [d["ui.panel.config.automation.description"], d["ui.panel.config.dashboard.people.secondary"], d["ui.panel.config.energy.battery.title"]];
   });
   ok("NL teksten: 'je locatie' i.p.v. 'je huis'", /je locatie/.test(loc[0]) && /je locatie/.test(loc[1] || "") && !/huis|woning/i.test(loc.join(" ")), JSON.stringify(loc));
-  await np.goto(BASE + "/config/system"); await sleep(6000);
-  const st = await np.evaluate(deepText);
+  await np.goto(BASE + "/config/system");
+  let st = "";
+  for (let i = 0; i < 20 && !/Algemeen|Woninginformatie/.test(st); i++) { await sleep(1500); st = await np.evaluate(deepText); }
   ok("NL Systeem: Algemeen i.p.v. Woninginformatie", st.includes("Algemeen") && !st.includes("Woninginformatie"), (st.match(/Algemeen|Woninginformatie/) || ["niets"])[0]);
   await np.screenshot({ path: (process.env.SHOT || "/tmp/bt.png").replace(/\.png$/, "_systeem.png") });
   await np.goto(BASE + "/config/general"); await sleep(6000);
@@ -392,7 +393,8 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
       res.writeHead(200, { "content-type": "application/json" });
       if (req.method === "GET" && req.url.startsWith("/commands")) {
         opgehaald.push(req.headers.authorization);
-        const q = wachtrij.splice(0); return res.end(JSON.stringify({ commands: q }));
+        const q = wachtrij.splice(0).map((c) => ("expires_at" in c ? c : { ...c, expires_at: new Date(Date.now() + 600000).toISOString() }));
+        return res.end(JSON.stringify({ commands: q }));
       }
       if (req.url.startsWith("/commands/result")) { try { resultaten.push(JSON.parse(body)); } catch (e) {} return res.end("{}"); }
       try { ontvangen.push({ auth: req.headers.authorization, body: JSON.parse(body) }); } catch (e) {}
@@ -411,8 +413,13 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   // v1.33.1: https verplicht (behalve lokaal adres)
   const fout = await setOpts({ ...ALLES, status_url: "http://work.btechnics.be/api/iot/status", status_token: "testsleutel" });
   ok("Status: http naar buiten geweigerd", fout.f.type === "form" && fout.f.errors && fout.f.errors.status_url === "status_url_https", JSON.stringify(fout.f.errors));
-  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.34.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
+  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.35.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
   ok("Status: geen sleutel in het bericht", !JSON.stringify(b).includes("testsleutel"));
+  {
+    const fl = await (await fetch(BASE + "/api/config/config_entries/options/flow", { method: "POST", headers: H, body: JSON.stringify({ handler: entry.entry_id }) })).json();
+    ok("Veilig: sleutel niet naar de browser (formulier)", !JSON.stringify(fl).includes("testsleutel") && (fl.data_schema || []).some((x) => x.name === "status_token_remove"), (fl.data_schema || []).filter((x) => /status/.test(x.name)).map((x) => x.name).join(","));
+    await fetch(BASE + "/api/config/config_entries/options/flow/" + fl.flow_id, { method: "DELETE", headers: H });
+  }
 
   // v1.34.0: bediening op afstand. De installatie haalt elke minuut opdrachten op.
   wachtrij.push(
@@ -422,7 +429,7 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
     { id: "c4", type: "skip_update", entity_id: "update.test_faalt" },
     { id: "c5", type: "clear_skipped", entity_id: "update.test_faalt" },
     { id: "c6", type: "install_update", entity_id: "update.test_faalt" },
-    { id: "c7", type: "restart" },
+    { id: "c7", type: "shutdown" },
     { id: "c8", type: "install_update", entity_id: "light.keuken" },
   );
   for (let i = 0; i < 30 && resultaten.length < 8; i++) await sleep(3000);
@@ -440,6 +447,40 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   const naOpAfstand = ontvangen.filter((x) => /op_afstand/.test(x.body.reason || ""));
   ok("Op afstand: status meteen bijgewerkt", naOpAfstand.length > 0 && naOpAfstand[naOpAfstand.length - 1].body.auto_update.time === "05:30:00", JSON.stringify(naOpAfstand.map((x) => x.body.reason)));
 
+  // v1.35.0: desktop-apps (fase 1 token, fase 2 aanmelding door de app)
+  {
+    const sendSt = async () => (await (await fetch(BASE + "/api/services/btechnics_branding/send_status?return_response", { method: "POST", headers: H, body: "{}" })).json()).service_response.bericht;
+    const llat = await ws({ type: "auth/long_lived_access_token", client_name: "Btechnics IOT MacBook", lifespan: 30 });
+    const ongebruikt = await ws({ type: "auth/long_lived_access_token", client_name: "Btechnics IOT reserve", lifespan: 30 });
+    await ws({ type: "auth/long_lived_access_token", client_name: "Ander token", lifespan: 30 });
+    const LH = { authorization: "Bearer " + llat, "content-type": "application/json" };
+    await fetch(BASE + "/api/", { headers: LH });
+    let da = (await sendSt()).desktop_apps || [];
+    ok("Desktop: token-regel uit gebruikt token", da.length === 1 && da[0].bron === "token" && /Btechnics IOT MacBook/.test(da[0].naam) && !!da[0].laatst_gezien && da[0].app_versie === null, JSON.stringify(da));
+    ok("Desktop: token zelf nooit in het bericht", !JSON.stringify(da).includes(llat) && !JSON.stringify(da).includes(ongebruikt.slice(-20)));
+    const voor = ontvangen.length;
+    const app = { app_id: "6f1c2d9e-8a41-4c1b-9f3e-2b7d5a0c4e11", naam: "iMac-keuken", app_versie: "3.8.0", platform: "macos", os_versie: "15.6", architectuur: "arm64" };
+    const reg = await fetch(BASE + "/api/services/btechnics_branding/register_desktop_app", { method: "POST", headers: LH, body: JSON.stringify(app) });
+    ok("Desktop: app meldt zich aan", reg.status === 200, String(reg.status));
+    await sleep(13000);
+    ok("Desktop: nieuwe app meteen gemeld", ontvangen.slice(voor).some((x) => /desktop_app/.test(x.body.reason || "")), JSON.stringify(ontvangen.slice(voor).map((x) => x.body.reason)));
+    da = (await sendSt()).desktop_apps || [];
+    ok("Desktop: app-regel vervangt token-regel", da.length === 1 && da[0].id === "app:" + app.app_id && da[0].bron === "app" && da[0].app_versie === "3.8.0" && da[0].platform === "macos" && da[0].laatste_ip === null, JSON.stringify(da));
+    const voor2 = ontvangen.length;
+    await fetch(BASE + "/api/services/btechnics_branding/register_desktop_app", { method: "POST", headers: LH, body: JSON.stringify(app) });
+    await sleep(13000);
+    ok("Desktop: uurlijkse aanmelding zonder wijziging stuurt niets", !ontvangen.slice(voor2).some((x) => /desktop_app/.test(x.body.reason || "")), JSON.stringify(ontvangen.slice(voor2).map((x) => x.body.reason)));
+    const fout = await fetch(BASE + "/api/services/btechnics_branding/register_desktop_app", { method: "POST", headers: LH, body: JSON.stringify({ ...app, platform: "linux" }) });
+    const html = await fetch(BASE + "/api/services/btechnics_branding/register_desktop_app", { method: "POST", headers: LH, body: JSON.stringify({ ...app, naam: "<img src=x onerror=alert(1)>" }) });
+    ok("Desktop: ongeldige waarden geweigerd", fout.status === 400 && html.status === 400, `${fout.status} ${html.status}`);
+    const ander = await fetch(BASE + "/api/services/btechnics_branding/register_desktop_app", { method: "POST", headers: UH, body: JSON.stringify(app) });
+    ok("Desktop: app_id van een andere gebruiker niet overschrijven", ander.status !== 200, String(ander.status));
+    const voor3 = ontvangen.length;
+    await fetch(BASE + "/api/services/btechnics_branding/register_desktop_app", { method: "POST", headers: LH, body: JSON.stringify({ ...app, app_versie: "3.8.1" }) });
+    await sleep(13000);
+    ok("Desktop: nieuwe app-versie meteen gemeld", ontvangen.slice(voor3).some((x) => /desktop_app/.test(x.body.reason || "") && (x.body.desktop_apps || []).some((a) => a.app_versie === "3.8.1")), JSON.stringify(ontvangen.slice(voor3).map((x) => x.body.reason)));
+  }
+
   // Diagnose downloaden: zonder sleutel
   const diag = await (await fetch(BASE + "/api/diagnostics/config_entry/" + entry.entry_id, { headers: H })).json();
   ok("Diagnose: te downloaden", !!(diag && diag.data && diag.data.automatische_updates), Object.keys((diag && diag.data) || {}).join(","));
@@ -456,8 +497,104 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   await sleep(14000);
   const melding = ontvangen.slice(voor).find((x) => x.body.branding && x.body.branding.ok === false);
   ok("Status: branding probleem meteen gemeld", !!melding && /branding/.test(melding.body.reason), JSON.stringify(ontvangen.slice(voor).map((x) => [x.body.sent_at, x.body.reason, x.body.branding])) + " post " + postAt);
+  // v1.35.0: meldingenlog in de status
+  const metLogs = ontvangen.filter((x) => x.body.logs).pop();
+  const lg = metLogs ? metLogs.body.logs : {};
+  ok("Logs: eigen gebeurtenissen", Array.isArray(lg.btechnics) && lg.btechnics.some((e) => /op afstand/.test(e.message)), (lg.btechnics || []).slice(-3).map((e) => e.message).join(" / "));
+  ok("Logs: reparaties", Array.isArray(lg.repairs) && lg.repairs.some((r) => r.domain === "btechnics_branding"), (lg.repairs || []).map((r) => r.domain + ":" + r.issue_id).join(","));
+  ok("Logs: meldingen en fouten", Array.isArray(lg.notifications) && Array.isArray(lg.errors), `meldingen ${(lg.notifications || []).length}, fouten ${(lg.errors || []).length}`);
+  ok("Logs: geen eigen BT waarschuwingen in de foutenlijst", !(lg.errors || []).some((e) => /btechnics_branding\.(auto_update|remote)/.test(e.name || "")), (lg.errors || []).map((e) => e.name).join(","));
+
+  // v1.35.0: vervaldatum en strikte ja/nee velden
+  let E = await (async () => { resultaten.length = 0; wachtrij.push(
+    { id: "e1", type: "send_status", expires_at: "2020-01-01T00:00:00+00:00" },
+    { id: "e2", type: "send_status", expires_at: null },
+    { id: "e3", type: "set_auto_update", enabled: "false" },
+    { id: "e4", type: "send_status", expires_at: new Date(Date.now() + 3 * 86400000).toISOString() });
+    for (let i = 0; i < 30 && resultaten.length < 4; i++) await sleep(3000);
+    return Object.fromEntries(resultaten.map((x) => [x.id, x])); })();
+  ok("Veilig: verlopen opdracht geweigerd", E.e1 && !E.e1.ok && /verlopen/.test(E.e1.error), JSON.stringify(E.e1));
+  ok("Veilig: opdracht zonder vervaldatum geweigerd", E.e2 && !E.e2.ok && /expires_at/.test(E.e2.error), JSON.stringify(E.e2));
+  ok("Veilig: \"false\" als tekst geweigerd", E.e3 && !E.e3.ok && /true of false/.test(E.e3.error), JSON.stringify(E.e3));
+  ok("Veilig: vervaldatum te ver vooruit geweigerd", E.e4 && !E.e4.ok && /te ver/.test(E.e4.error), JSON.stringify(E.e4));
+
+  // v1.35.0: gebruikersbeheer op afstand (standaard uit)
+  const login = async (u, pw) => {
+    let f = await (await fetch(BASE + "/auth/login_flow", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client_id: CLIENT_ID, handler: ["homeassistant", null], redirect_uri: CLIENT_ID }) })).json();
+    f = await (await fetch(BASE + "/auth/login_flow/" + f.flow_id, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client_id: CLIENT_ID, username: u, password: pw }) })).json();
+    return f.type === "create_entry";
+  };
+  const batch = async (cmds) => {
+    resultaten.length = 0; wachtrij.push(...cmds);
+    for (let i = 0; i < 30 && resultaten.length < cmds.length; i++) await sleep(3000);
+    return Object.fromEntries(resultaten.map((x) => [x.id, x]));
+  };
+  let U = await batch([{ id: "u0", type: "create_user", name: "Uit", username: "uittest" }]);
+  ok("Gebruikers: standaard uit", U.u0 && !U.u0.ok && /staat uit/.test(U.u0.error), JSON.stringify(U.u0));
+  await setOpts({ ...ALLES, status_url: `http://${GW}:8999/status`, remote_users: true }); await sleep(1000);
+  U = await batch([{ id: "u1", type: "create_user", name: "Klant Test", username: "klanttest", admin: false }]);
+  const nieuw = U.u1 && U.u1.result;
+  ok("Gebruikers: aanmaken met gemaakt wachtwoord", U.u1 && U.u1.ok && nieuw.password && nieuw.password.length >= 12 && nieuw.admin === false, JSON.stringify(U.u1 && { ...U.u1, result: { ...nieuw, password: nieuw && nieuw.password ? "***" : null } }));
+  ok("Gebruikers: kan aanmelden met dat wachtwoord", !!nieuw && (await login("klanttest", nieuw.password)));
+  const users1 = (await (await fetch(BASE + "/api/services/btechnics_branding/send_status?return_response", { method: "POST", headers: H, body: "{}" })).json()).service_response.bericht.users || [];
+  const eigenaar = users1.find((u) => u.owner);
+  ok("Gebruikers: overzicht in de status (zonder systeemgebruikers)", users1.some((u) => u.username === "klanttest") && !!eigenaar && users1.every((u) => u.name !== "Supervisor"), users1.map((u) => `${u.username}${u.admin ? "(beheerder)" : ""}`).join(","));
+  U = await batch([
+    { id: "u2", type: "update_user", user_id: nieuw.id, admin: true, name: "Klant Beheer" },
+    { id: "u3", type: "set_password", user_id: nieuw.id, password: "kort" },
+    { id: "u4", type: "set_password", user_id: nieuw.id, password: "EenLangGenoegWachtwoord1" },
+    { id: "u5", type: "logout_user", user_id: nieuw.id },
+    { id: "u6", type: "delete_user", user_id: eigenaar.id },
+    { id: "u7", type: "update_user", user_id: eigenaar.id, admin: false },
+    { id: "u8", type: "create_user", name: "Dubbel", username: "klanttest" },
+    { id: "u9", type: "create_user", name: "Fout", username: "A B" },
+    { id: "u11", type: "set_password", user_id: eigenaar.id },
+    { id: "u12", type: "logout_user", user_id: eigenaar.id },
+  ]);
+  ok("Gebruikers: wachtwoord eigenaar niet wijzigen", U.u11 && !U.u11.ok && /eigenaar/.test(U.u11.error), JSON.stringify(U.u11));
+  ok("Gebruikers: eigenaar niet afmelden", U.u12 && !U.u12.ok && /eigenaar/.test(U.u12.error), JSON.stringify(U.u12));
+  ok("Gebruikers: rechten en naam aanpassen", U.u2 && U.u2.ok && U.u2.result.admin === true && U.u2.result.name === "Klant Beheer", JSON.stringify(U.u2));
+  ok("Gebruikers: te kort wachtwoord geweigerd", U.u3 && !U.u3.ok && /12 tekens/.test(U.u3.error), JSON.stringify(U.u3));
+  ok("Gebruikers: wachtwoord wijzigen", U.u4 && U.u4.ok && !U.u4.result.password && (await login("klanttest", "EenLangGenoegWachtwoord1")) && !(await login("klanttest", nieuw.password)), JSON.stringify(U.u4));
+  ok("Gebruikers: overal afmelden", U.u5 && U.u5.ok, JSON.stringify(U.u5));
+  ok("Gebruikers: eigenaar niet verwijderen", U.u6 && !U.u6.ok && /eigenaar/.test(U.u6.error), JSON.stringify(U.u6));
+  ok("Gebruikers: eigenaar blijft beheerder", U.u7 && !U.u7.ok && /eigenaar/.test(U.u7.error), JSON.stringify(U.u7));
+  ok("Gebruikers: dubbele gebruikersnaam geweigerd", U.u8 && !U.u8.ok && /bestaat al/.test(U.u8.error), JSON.stringify(U.u8));
+  ok("Gebruikers: ongeldige gebruikersnaam geweigerd", U.u9 && !U.u9.ok, JSON.stringify(U.u9));
+  U = await batch([{ id: "u10", type: "delete_user", user_id: nieuw.id }]);
+  ok("Gebruikers: verwijderen", U.u10 && U.u10.ok && !(await login("klanttest", "EenLangGenoegWachtwoord1")), JSON.stringify(U.u10));
+  const sm = (await (await fetch(BASE + "/api/services/btechnics_branding/send_status?return_response", { method: "POST", headers: H, body: "{}" })).json()).service_response.bericht;
+  ok("Gebruikers: klant ziet een melding in HA", (sm.logs.notifications || []).some((n) => /gebruikersbeheer/i.test(n.title)), (sm.logs.notifications || []).map((n) => n.title).join(","));
+  const hlog = await (await fetch(BASE + "/api/error_log", { headers: H })).text().catch(() => "");
+  ok("Gebruikers: wachtwoord nergens in het HA log", !hlog.includes("EenLangGenoegWachtwoord1") && !(nieuw && hlog.includes(nieuw.password)), "");
+
+  // v1.35.0: herstart op afstand (eerst configuratiecontrole). Toestel herstarten kan niet in een container.
+  resultaten.length = 0;
+  wachtrij.push({ id: "r1", type: "reboot_host" }, { id: "r2", type: "restart" }, { id: "r3", type: "send_status" });
+  for (let i = 0; i < 30 && resultaten.length < 3; i++) await sleep(3000);
+  const RR = Object.fromEntries(resultaten.map((x) => [x.id, x]));
+  ok("Op afstand: toestel herstarten geweigerd buiten HA OS", RR.r1 && RR.r1.ok === false && /HA OS/.test(RR.r1.error), JSON.stringify(RR.r1));
+  ok("Op afstand: herstart aanvaard na configuratiecontrole", RR.r2 && RR.r2.ok === true && RR.r2.result.herstart_over_s > 0, JSON.stringify(RR.r2));
+  ok("Veilig: na een herstart niets meer uit dezelfde reeks", RR.r3 && RR.r3.ok === false && /overgeslagen/.test(RR.r3.error), JSON.stringify(RR.r3));
+  let down = false, up = false;
+  for (let i = 0; i < 40 && !down; i++) { try { const r = await fetch(BASE + "/api/", { headers: H, signal: AbortSignal.timeout(3000) }); if (r.status >= 500) down = true; } catch { down = true; } if (!down) await sleep(1500); }
+  for (let i = 0; i < 90 && down && !up; i++) { await sleep(3000); try { const r = await fetch(BASE + "/api/", { headers: H, signal: AbortSignal.timeout(3000) }); up = r.status === 200; } catch {} }
+  ok("Op afstand: HA herstart en komt terug", down && up, `down ${down} up ${up}`);
+  let startMsg = null;
+  for (let i = 0; i < 30 && !startMsg; i++) { await sleep(3000); startMsg = ontvangen.filter((x) => /start/.test(x.body.reason || "")).pop(); }
+  ok("Op afstand: status na herstart", !!startMsg, startMsg ? startMsg.body.reason : "niets");
+  // Dezelfde opdracht opnieuw aangeboden na de herstart: nooit een tweede keer
+  resultaten.length = 0; opgehaald.length = 0;
+  wachtrij.push({ id: "r2", type: "restart" });
+  for (let i = 0; i < 30 && resultaten.length === 0; i++) await sleep(3000);
+  await sleep(15000);
+  let nogOp = false; try { nogOp = (await fetch(BASE + "/api/", { headers: H, signal: AbortSignal.timeout(3000) })).status === 200; } catch {}
+  const herhaald = resultaten.find((r) => r.id === "r2");
+  ok("Veilig: uitgevoerde opdracht na herstart niet opnieuw (wel resultaat opnieuw gemeld)", opgehaald.length > 0 && nogOp && herhaald && herhaald.result && herhaald.result.herhaald === true, `opgehaald ${opgehaald.length} op ${nogOp} ${JSON.stringify(herhaald)}`);
+  await page.goto(BASE + "/config/dashboard"); await sleep(8000);
+
   // v1.33.1: sleutel leegmaken (de interface stuurt een leeg veld niet mee)
-  await setOpts({ ...ALLES, status_url: `http://${GW}:8999/status` }); await sleep(500);
+  await setOpts({ ...ALLES, status_url: `http://${GW}:8999/status`, status_token_remove: true }); await sleep(500);
   const leeg = (await (await fetch(BASE + "/api/services/btechnics_branding/send_status?return_response", { method: "POST", headers: H, body: "{}" })).json()).service_response;
   ok("Status: sleutel leegmaken stopt het versturen", leeg && leeg.resultaat.ok === false && /geen sleutel/.test(leeg.resultaat.error), JSON.stringify(leeg && leeg.resultaat));
   srv.close();

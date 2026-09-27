@@ -107,14 +107,14 @@ class BtechnicsBrandingOptionsFlow(config_entries.OptionsFlow):
             options = dict(current)
             file_id = user_input.pop("customer_logo", None)
             remove = user_input.pop("remove_customer_logo", False)
-            # v1.33.1: een leeg veld stuurt de interface niet mee. Omdat de sleutel
-            # voorgevuld staat, betekent "ontbreekt" dus: bewust leeggemaakt.
+            # v1.35.0: leeg veld = sleutel ongewijzigd; wissen met het vinkje
             token = (user_input.pop("status_token", "") or "").strip()
+            remove_token = user_input.pop("status_token_remove", False)
             options.update(user_input)
-            if token:
-                options["status_token"] = token
-            else:
+            if remove_token:
                 options.pop("status_token", None)
+            elif token:
+                options["status_token"] = token
             if not _status_url_ok(options.get("status_url", "")):
                 errors["status_url"] = "status_url_https"
 
@@ -178,11 +178,16 @@ class BtechnicsBrandingOptionsFlow(config_entries.OptionsFlow):
 
         # v1.33.0: status naar Btechnics (Work-app). Zonder sleutel wordt niets verstuurd.
         schema[vol.Optional("status_url", default=current.get("status_url", "https://work.btechnics.be/api/iot/status"))] = str
-        schema[vol.Optional("status_token", description={"suggested_value": current.get("status_token", "")})] = selector.TextSelector(
+        # v1.35.0: de sleutel wordt niet meer naar de browser gestuurd. Leeg = ongewijzigd.
+        schema[vol.Optional("status_token")] = selector.TextSelector(
             selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
         )
+        if current.get("status_token"):
+            schema[vol.Optional("status_token_remove", default=False)] = bool
         # v1.34.0: Btechnics mag updates vanop afstand beheren (remote.py)
         schema[vol.Optional("remote_control", default=current.get("remote_control", True))] = bool
+        # v1.35.0: gebruikers beheren vanop afstand (users.py)
+        schema[vol.Optional("remote_users", default=current.get("remote_users", False))] = bool
 
         return self.async_show_form(
             step_id="init",

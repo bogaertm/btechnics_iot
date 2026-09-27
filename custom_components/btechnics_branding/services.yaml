@@ -6,3 +6,29 @@ run_updates:
         boolean:
 
 send_status:
+
+register_desktop_app:
+  fields:
+    app_id:
+      required: true
+      selector:
+        text:
+    naam:
+      required: true
+      selector:
+        text:
+    app_versie:
+      required: true
+      selector:
+        text:
+    platform:
+      required: true
+      selector:
+        select:
+          options: ["macos", "windows"]
+    os_versie:
+      selector:
+        text:
+    architectuur:
+      selector:
+        text:

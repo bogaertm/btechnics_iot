@@ -230,9 +230,16 @@ def _branding_broken(hass: HomeAssistant) -> bool:
     return issue is not None and issue.active and not issue.dismissed_version
 
 
+_DATA_EVENTS = "btechnics_branding_events"
+
+
 def _log(hass: HomeAssistant, message: str) -> None:
-    """Zichtbaar in Activiteit (logboek) en in het HA log."""
-    _LOGGER.warning("BT auto-update: %s", message)
+    """Zichtbaar in Activiteit (logboek), in het HA log en (v1.35.0) in de Work-app."""
+    # info i.p.v. warning: anders vullen onze eigen berichten de foutenlijst in de Work-app
+    _LOGGER.info("BT auto-update: %s", message)
+    events = hass.data.setdefault(_DATA_EVENTS, [])
+    events.append({"at": dt_util.utcnow().isoformat(), "message": message})
+    del events[:-100]
     if not hass.services.has_service("logbook", "log"):
         return
     try:
@@ -308,10 +315,10 @@ async def _async_run_locked(hass: HomeAssistant, options: dict, trigger: str) ->
                 hacs_done = True
         except TimeoutError:
             result["failed"].append(f"{label}: duurde langer dan {_INSTALL_TIMEOUT // 60} minuten")
-            _LOGGER.warning("BT auto-update: %s duurde te lang", label)
+            _LOGGER.info("BT auto-update: %s duurde te lang", label)
         except Exception as err:  # noqa: BLE001
             result["failed"].append(f"{label}: {err or type(err).__name__}")
-            _LOGGER.warning("BT auto-update: %s mislukt: %s", label, err)
+            _LOGGER.info("BT auto-update: %s mislukt: %s", label, err)
         else:
             if upd["kind"] == "supervisor" and index + 1 < len(todo):
                 # v1.33.1: de Supervisor herstart zichzelf na een update. Wat nu volgt,
