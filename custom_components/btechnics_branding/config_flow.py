@@ -92,6 +92,8 @@ class BtechnicsBrandingOptionsFlow(config_entries.OptionsFlow):
             file_id = user_input.pop("customer_logo", None)
             remove = user_input.pop("remove_customer_logo", False)
             options.update(user_input)
+            if not (options.get("status_token") or "").strip():
+                options.pop("status_token", None)
 
             if remove:
                 await self.hass.async_add_executor_job(_remove_customer_logo, self.hass)
@@ -150,6 +152,12 @@ class BtechnicsBrandingOptionsFlow(config_entries.OptionsFlow):
             )
         )
         schema[vol.Optional("auto_update_backup", default=current.get("auto_update_backup", True))] = bool
+
+        # v1.33.0: status naar Btechnics (Work-app). Zonder sleutel wordt niets verstuurd.
+        schema[vol.Optional("status_url", default=current.get("status_url", "https://work.btechnics.be/api/iot/status"))] = str
+        schema[vol.Optional("status_token", description={"suggested_value": current.get("status_token", "")})] = selector.TextSelector(
+            selector.TextSelectorConfig(type=selector.TextSelectorType.PASSWORD)
+        )
 
         return self.async_show_form(
             step_id="init",

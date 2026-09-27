@@ -39,6 +39,7 @@ from homeassistant.const import EVENT_STATE_CHANGED
 from homeassistant.core import Event, HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_time_change
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
@@ -303,6 +304,8 @@ async def async_run(hass: HomeAssistant, options: dict, trigger: str = "schema")
         summary.append("overgeslagen: " + "; ".join(skipped))
     _log(hass, " | ".join(summary))
 
+    async_dispatcher_send(hass, f"{DOMAIN}_status_changed", "updates")
+
     # HACS integraties worden pas actief na een herstart. Core/OS herstart al zelf.
     if hacs_done and not any(u["kind"] in ("core", "os") for u in todo):
         _log(hass, "herstart na HACS updates")
@@ -352,6 +355,7 @@ def async_sync_visibility(hass: HomeAssistant, options: dict, only: str | None =
             if issues.async_get_issue(DOMAIN, issue_id) is None:
                 name = str(state.attributes.get("title") or state.attributes.get("friendly_name") or eid)
                 _log(hass, f"{name} {latest}: {MAX_ATTEMPTS} keer mislukt, weer zichtbaar in de zijbalk")
+                async_dispatcher_send(hass, f"{DOMAIN}_status_changed", "update_mislukt")
             ir.async_create_issue(
                 hass, DOMAIN, issue_id,
                 is_fixable=False, is_persistent=False,

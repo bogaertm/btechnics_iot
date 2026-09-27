@@ -29,9 +29,11 @@
           "auto_update": "Automatic updates",
           "auto_update_time": "Update time",
           "auto_update_categories": "What may be updated automatically",
-          "auto_update_backup": "Back up before each update"
+          "auto_update_backup": "Back up before each update",
+          "status_url": "Address for the status to Btechnics",
+          "status_token": "Key of this customer (from the Work app)"
         },
-        "description": "Current customer logo: {customer_logo_status}"
+        "description": "Current customer logo: {customer_logo_status}\n\nStatus to Btechnics: fill in the key of this customer. Without a key nothing is sent."
       }
     },
     "error": {
@@ -68,6 +70,10 @@
           "description": "Show what would be installed without doing anything."
         }
       }
+    },
+    "send_status": {
+      "name": "Send status to Btechnics",
+      "description": "Sends the status of this installation to Btechnics right away and shows what was sent."
     }
   }
 }

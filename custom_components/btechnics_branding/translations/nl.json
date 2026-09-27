@@ -29,9 +29,11 @@
           "auto_update": "Automatische updates",
           "auto_update_time": "Uur van de updates",
           "auto_update_categories": "Wat mag automatisch bijgewerkt worden",
-          "auto_update_backup": "Back-up voor elke update"
+          "auto_update_backup": "Back-up voor elke update",
+          "status_url": "Adres voor de status naar Btechnics",
+          "status_token": "Sleutel van deze klant (uit de Work-app)"
         },
-        "description": "Huidig klantenlogo: {customer_logo_status}"
+        "description": "Huidig klantenlogo: {customer_logo_status}\n\nStatus naar Btechnics: vul de sleutel van deze klant in. Zonder sleutel wordt niets verstuurd."
       }
     },
     "error": {
@@ -68,6 +70,10 @@
           "description": "Toon wat er geinstalleerd zou worden, zonder iets te doen."
         }
       }
+    },
+    "send_status": {
+      "name": "Status naar Btechnics versturen",
+      "description": "Verstuurt meteen de status van deze installatie naar Btechnics en toont wat er verstuurd werd."
     }
   }
 }

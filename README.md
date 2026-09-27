@@ -44,6 +44,21 @@ In de opties staat **Automatische updates** (standaard uit). Aan betekent: elke 
 
 Service `btechnics_branding.run_updates` start het meteen; met `dry_run: true` zie je enkel wat er zou gebeuren.
 
+## Status naar Btechnics
+
+Vul in de opties de **sleutel van deze klant** in (aan te maken in de Work-app). Dan stuurt de installatie elk uur, en meteen bij een probleem, een korte status naar `https://work.btechnics.be/api/iot/status`: naam, versies, stand van de branding en openstaande of mislukte updates. Geen wachtwoorden, geen toestelgegevens. Zonder sleutel wordt niets verstuurd.
+
+Service `btechnics_branding.send_status` verstuurt meteen en toont wat er verstuurd werd.
+
+## Diagnose en verwijderen
+
+- **Diagnose downloaden** (Instellingen > Apparaten en diensten > Btechnics IOT > drie puntjes): alles wat de integratie weet in een bestand, zonder sleutel. Handig bij support.
+- **Verwijderen**: het klantenlogo, de bijgehouden pogingen en alles wat verborgen was, worden opgeruimd.
+
+## Vereisten
+
+Home Assistant 2026.8.0 of nieuwer. Getest op 2026.8.0 en 2026.9.3. Op oudere versies toont onder meer het opstartscherm nog het oorspronkelijke logo.
+
 ## Na een update
 
 De branding haakt in op de interne opbouw van het systeem. Daarom zijn er twee vangnetten:

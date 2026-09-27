@@ -286,10 +286,47 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   await setOpts(ALLES); await sleep(2000);
   ok("Aan: 2 mislukte pogingen onthouden", (await reg("update.test_faalt")).hidden_by === null);
 
-  // Stoppen bij een branding probleem
+  // v1.33.0: status naar Btechnics. Nep Work-app op de host (docker gateway).
+  const http = await import("node:http");
+  const ontvangen = [];
+  const srv = http.createServer((req, res) => {
+    let body = "";
+    req.on("data", (c) => (body += c));
+    req.on("end", () => {
+      try { ontvangen.push({ auth: req.headers.authorization, body: JSON.parse(body) }); } catch (e) {}
+      res.writeHead(200, { "content-type": "application/json" }); res.end("{}");
+    });
+  });
+  await new Promise((r) => srv.listen(8999, "0.0.0.0", r));
+  const GW = process.env.BT_GATEWAY || "172.17.0.1";
+  const zonder = (await (await fetch(BASE + "/api/services/btechnics_branding/send_status?return_response", { method: "POST", headers: H, body: "{}" })).json()).service_response;
+  ok("Status: zonder sleutel niets verstuurd", zonder && zonder.resultaat.ok === false && ontvangen.length === 0, JSON.stringify(zonder && zonder.resultaat));
+  await setOpts({ ...ALLES, status_url: `http://${GW}:8999/status`, status_token: "testsleutel" }); await sleep(1000);
+  const met = (await (await fetch(BASE + "/api/services/btechnics_branding/send_status?return_response", { method: "POST", headers: H, body: "{}" })).json()).service_response;
+  const laatste = ontvangen[ontvangen.length - 1];
+  ok("Status: verstuurd met sleutel", met && met.resultaat.ok === true && laatste && laatste.auth === "Bearer testsleutel", JSON.stringify(met && met.resultaat));
+  const b = laatste ? laatste.body : {};
+  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.33.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
+  ok("Status: geen sleutel in het bericht", !JSON.stringify(b).includes("testsleutel"));
+
+  // Diagnose downloaden: zonder sleutel
+  const diag = await (await fetch(BASE + "/api/diagnostics/config_entry/" + entry.entry_id, { headers: H })).json();
+  ok("Diagnose: te downloaden", !!(diag && diag.data && diag.data.automatische_updates), Object.keys((diag && diag.data) || {}).join(","));
+  ok("Diagnose: sleutel afgeschermd", !JSON.stringify(diag).includes("testsleutel"));
+
+  // Stoppen bij een branding probleem (en meteen melden aan Btechnics)
+  // De open pagina meldt zelf 20 s na het laden "alles ok"; die mag de test niet storen
+  await page.goto("about:blank");
+  const voor = ontvangen.length;
+  const postAt = new Date().toISOString();
   await fetch(BASE + "/api/btechnics_branding/health", { method: "POST", headers: H, body: JSON.stringify({ problems: ["sidebar"] }) });
   const stopped = await call(true);
   ok("Stopt bij probleem met branding", stopped.branding_probleem === true);
+  await sleep(14000);
+  const melding = ontvangen.slice(voor).find((x) => x.body.branding && x.body.branding.ok === false);
+  ok("Status: branding probleem meteen gemeld", !!melding && /branding/.test(melding.body.reason), JSON.stringify(ontvangen.slice(voor).map((x) => [x.body.sent_at, x.body.reason, x.body.branding])) + " post " + postAt);
+  srv.close();
+  await page.goto(BASE + "/config/dashboard"); await sleep(8000);
   await fetch(BASE + "/api/btechnics_branding/health", { method: "POST", headers: H, body: JSON.stringify({ problems: [] }) });
 }
 
@@ -310,6 +347,25 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
     if (last && last.trigger === "schema") break;
   }
   ok("Start zelf op het ingestelde uur", !!last && last.trigger === "schema", `${hhmm} ${cfg.time_zone} -> ${last ? last.trigger + " " + last.started : "niets"}`);
+}
+
+// ---------------------------------------------------------------- verwijderen: niets achterlaten
+{
+  const entries = await (await fetch(BASE + "/api/config/config_entries/entry", { headers: H })).json();
+  const entry = entries.find((e) => e.domain === "btechnics_branding");
+  const cfgDir = process.env.BT_CONFIG_DIR;
+  const store = path.join(cfgDir, ".storage/btechnics_branding.auto_update");
+  const logoDir = path.join(cfgDir, "btechnics_branding");
+  const hadStore = fs.existsSync(store);
+  fs.mkdirSync(logoDir, { recursive: true });
+  fs.writeFileSync(path.join(logoDir, "customer_logo.png"), fs.readFileSync(path.join(COMP, "app-icon-192.png")));
+  const del = await fetch(BASE + "/api/config/config_entries/entry/" + entry.entry_id, { method: "DELETE", headers: H });
+  await sleep(3000);
+  ok("Verwijderen: integratie weg", del.status === 200, String(del.status));
+  ok("Verwijderen: tellingen opgeruimd", hadStore && !fs.existsSync(store), `voor ${hadStore} na ${fs.existsSync(store)}`);
+  ok("Verwijderen: klantenlogo opgeruimd", !fs.existsSync(logoDir) || fs.readdirSync(logoDir).length === 0, fs.existsSync(logoDir) ? fs.readdirSync(logoDir).join(",") : "weg");
+  const reg = await page.evaluate(() => document.querySelector("home-assistant").hass.callWS({ type: "config/entity_registry/get", entity_id: "update.test_faalt" }));
+  ok("Verwijderen: niets meer verborgen", reg.hidden_by !== "integration", String(reg.hidden_by));
 }
 
 await browser.close();

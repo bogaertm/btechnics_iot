@@ -121,7 +121,8 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
 
-from . import auto_update
+from . import auto_update, status
+from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 _LOGGER = logging.getLogger(__name__)
 DOMAIN = "btechnics_branding"
@@ -592,6 +593,10 @@ def _check_backend(hass) -> set[str]:
 def _update_issue(hass) -> None:
     state = _health(hass)
     problems = sorted(state["backend"] | state["frontend"])
+    # v1.33.0: Btechnics meteen verwittigen als de stand verandert
+    if state.get("sent") != problems:
+        state["sent"] = problems
+        async_dispatcher_send(hass, status.SIGNAL_CHANGED, "branding")
     if not problems:
         ir.async_delete_issue(hass, DOMAIN, _ISSUE_ID)
         return
@@ -629,6 +634,7 @@ class BtechnicsBrandingHealthView(HomeAssistantView):
         return self.json({
             "problems": sorted(state["backend"] | state["frontend"]),
             "auto_update_last": self.hass.data.get("btechnics_branding_update_last"),
+            "status_last": (self.hass.data.get("btechnics_branding_status") or {}).get("last"),
         })
 
     async def post(self, request):
@@ -691,13 +697,15 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
     auto_update.register_services(hass, lambda: dict(entry.options))
     auto_update.async_schedule(hass, dict(entry.options))
     await auto_update.async_setup_visibility(hass, lambda: dict(entry.options))
+    status.register_services(hass, lambda: dict(entry.options))
+    await status.async_setup(hass, lambda: dict(entry.options))
 
     if hass.is_running:
         hass.async_create_task(_delayed())
     else:
         hass.bus.async_listen_once("homeassistant_started", _delayed)
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    _LOGGER.info("BT: v1.32.0 klaar")
+    _LOGGER.info("BT: v1.33.0 klaar")
     return True
 
 
@@ -705,9 +713,29 @@ async def async_update_listener(hass: HomeAssistant, entry) -> None:
     # Geen herlaad (de views en routes zijn al geregistreerd); enkel herplannen.
     auto_update.async_schedule(hass, dict(entry.options))
     auto_update.apply_options(hass, dict(entry.options))
+    async_dispatcher_send(hass, status.SIGNAL_CHANGED, "instellingen")
 
 
 async def async_unload_entry(hass: HomeAssistant, entry) -> bool:
     auto_update.async_unschedule(hass)
     auto_update.async_teardown_visibility(hass)
+    status.async_teardown(hass)
     return True
+
+
+async def async_remove_entry(hass: HomeAssistant, entry) -> None:
+    """v1.33.0: integratie verwijderd, niets achterlaten."""
+    from homeassistant.helpers.storage import Store
+    from .config_flow import CUSTOMER_LOGO_DIR, _remove_customer_logo
+
+    def _cleanup() -> None:
+        _remove_customer_logo(hass)
+        folder = pathlib.Path(hass.config.path(CUSTOMER_LOGO_DIR))
+        try:
+            if folder.is_dir() and not any(folder.iterdir()):
+                folder.rmdir()
+        except OSError as err:
+            _LOGGER.warning("BT: map %s niet verwijderd: %s", folder, err)
+
+    await hass.async_add_executor_job(_cleanup)
+    await Store(hass, 1, f"{DOMAIN}.auto_update").async_remove()
