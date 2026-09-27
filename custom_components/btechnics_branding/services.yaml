@@ -1,0 +1,6 @@
+run_updates:
+  fields:
+    dry_run:
+      default: false
+      selector:
+        boolean:

@@ -30,6 +30,19 @@ frontend:
 ```
 7. Herstart de installatie opnieuw
 
+## Automatische updates
+
+In de opties staat **Automatische updates** (standaard uit). Aan betekent: elke nacht op het gekozen uur (standaard 04:00) worden de beschikbare updates geinstalleerd, in deze volgorde: Supervisor, apps, HACS, eventueel firmware van toestellen, en als laatste Core of OS.
+
+- Core enkel vanaf de eerste bugfix van een maand (x.1), nooit een .0, beta of release candidate.
+- Back-up voor elke update die dat ondersteunt (Core, OS, apps).
+- Geen updates zolang de zelfcontrole een probleem met de branding meldt.
+- Core en OS herstarten het systeem, dus hoogstens een van beide per nacht. Na HACS updates volgt een herstart.
+- Een update die je zelf overslaat, wordt nooit automatisch geinstalleerd.
+- Wat er gebeurd is, staat in Activiteit onder "Btechnics IOT updates".
+
+Service `btechnics_branding.run_updates` start het meteen; met `dry_run: true` zie je enkel wat er zou gebeuren.
+
 ## Na een update
 
 De branding haakt in op de interne opbouw van het systeem. Daarom zijn er twee vangnetten:

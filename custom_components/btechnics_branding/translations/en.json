@@ -25,7 +25,11 @@
           "zoom_breakpoint": "Mobile/desktop breakpoint (px width)",
           "customer_logo": "Upload customer logo (png, jpg, svg, webp)",
           "customer_logo_scale": "Customer logo size (% of the Btechnics logo)",
-          "remove_customer_logo": "Remove customer logo"
+          "remove_customer_logo": "Remove customer logo",
+          "auto_update": "Automatic updates",
+          "auto_update_time": "Update time",
+          "auto_update_categories": "What may be updated automatically",
+          "auto_update_backup": "Back up before each update"
         },
         "description": "Current customer logo: {customer_logo_status}"
       }
@@ -38,6 +42,28 @@
     "hooks_broken": {
       "title": "Btechnics IOT: branding partly inactive after update",
       "description": "After updating to version {ha_version} these parts of the Btechnics IOT branding no longer work: {problems}.\n\nThe system itself keeps working; the original logo or name may be visible in those places. Update Btechnics IOT Features via HACS once a new version is available, or contact Btechnics."
+    }
+  },
+  "selector": {
+    "auto_update_categories": {
+      "options": {
+        "system": "System (Core from x.1, OS, Supervisor)",
+        "addons": "Apps (add-ons)",
+        "hacs": "HACS integrations and cards",
+        "firmware": "Device firmware"
+      }
+    }
+  },
+  "services": {
+    "run_updates": {
+      "name": "Run updates now",
+      "description": "Installs available updates now, following the Btechnics IOT settings.",
+      "fields": {
+        "dry_run": {
+          "name": "Dry run",
+          "description": "Show what would be installed without doing anything."
+        }
+      }
     }
   }
 }

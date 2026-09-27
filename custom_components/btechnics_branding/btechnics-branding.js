@@ -1,5 +1,5 @@
 /**
- * Btechnics IOT Branding v1.30.0
+ * Btechnics IOT Branding v1.31.0
  *
  * v1.28.2: zoom van de hele interface instelbaar per desktop en mobiel
  *          (opties zoom_desktop, zoom_mobile, zoom_breakpoint; standaard

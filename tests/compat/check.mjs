@@ -20,7 +20,7 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function waitFor(url, maxS = 600) {
   for (let i = 0; i < maxS / 5; i++) {
-    try { const r = await fetch(url); if (r.status < 500) return true; } catch {}
+    try { const r = await fetch(url, { signal: AbortSignal.timeout(5000) }); if (r.status < 500) return true; } catch {}
     await sleep(5000);
   }
   return false;
@@ -193,6 +193,65 @@ ok("Zelfcontrole maakt en wist melding", na1 === 1 && na2 === 0, `${na1} -> ${na
 const anon = await fetch(BASE + "/api/btechnics_branding/health", { method: "POST", body: "{}" });
 ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
 await browser.close();
+
+// ---------------------------------------------------------------- automatische updates
+{
+  const entries = await (await fetch(BASE + "/api/config/config_entries/entry", { headers: H })).json();
+  const entry = entries.find((e) => e.domain === "btechnics_branding");
+  let f = await (await fetch(BASE + "/api/config/config_entries/options/flow", { method: "POST", headers: H, body: JSON.stringify({ handler: entry.entry_id }) })).json();
+  const fields = (f.data_schema || []).map((x) => x.name);
+  ok("Opties tonen automatische updates", ["auto_update", "auto_update_time", "auto_update_categories", "auto_update_backup"].every((n) => fields.includes(n)), fields.join(","));
+  f = await (await fetch(BASE + "/api/config/config_entries/options/flow/" + f.flow_id, { method: "POST", headers: H,
+    body: JSON.stringify({ auto_update: true, auto_update_time: "04:00:00", auto_update_categories: ["system", "addons", "hacs", "firmware"], auto_update_backup: true }) })).json();
+  ok("Opties bewaren", f.type === "create_entry", f.type + " " + JSON.stringify(f.errors || ""));
+
+  const states = await (await fetch(BASE + "/api/states", { headers: H })).json();
+  const avail = states.filter((s) => s.entity_id.startsWith("update.") && s.state === "on" && (s.attributes.supported_features & 1)).map((s) => s.entity_id);
+  const call = async (dry) => (await fetch(BASE + "/api/services/btechnics_branding/run_updates?return_response", { method: "POST", headers: H, body: JSON.stringify({ dry_run: dry }) })).json();
+  const dry = await call(true);
+  const plan = dry.service_response || {};
+  ok("Dry run toont plan", Array.isArray(plan.zou_installeren) && plan.zou_installeren.length === avail.length, `${(plan.zou_installeren || []).length} van ${avail.length} beschikbaar`);
+  const still1 = (await (await fetch(BASE + "/api/states", { headers: H })).json()).filter((s) => s.entity_id.startsWith("update.") && s.state === "on" && (s.attributes.supported_features & 1)).length;
+  ok("Dry run installeert niets", still1 === avail.length, String(still1));
+
+  const real = (await call(false)).service_response || {};
+  ok("Run start op de achtergrond", Array.isArray(real.gestart) && real.gestart.length === plan.zou_installeren.length, String((real.gestart || []).length));
+  // Een update na de andere; de demo met 1000 stappen doet er zelf minuten over.
+  // Geslaagd als alles geinstalleerd is of nog bezig is (in_progress).
+  let open = avail.length, busy = 0;
+  for (let i = 0; i < 36; i++) {
+    await sleep(5000);
+    const st = (await (await fetch(BASE + "/api/states", { headers: H })).json()).filter((s) => avail.includes(s.entity_id) && s.state === "on");
+    busy = st.filter((s) => s.attributes.in_progress).length;
+    open = st.length - busy;
+    if (open === 0) break;
+  }
+  ok("Echte run installeert alles wat kan", open === 0, `niet gestart: ${open}, bezig: ${busy}`);
+  // Stoppen bij een branding probleem
+  await fetch(BASE + "/api/btechnics_branding/health", { method: "POST", headers: H, body: JSON.stringify({ problems: ["sidebar"] }) });
+  const stopped = (await call(true)).service_response || {};
+  ok("Stopt bij probleem met branding", stopped.branding_probleem === true, JSON.stringify(stopped).slice(0, 80));
+  await fetch(BASE + "/api/btechnics_branding/health", { method: "POST", headers: H, body: JSON.stringify({ problems: [] }) });
+}
+
+// ---------------------------------------------------------------- planning op het uur
+{
+  const cfg = await (await fetch(BASE + "/api/config", { headers: H })).json();
+  const nu = new Date(Date.now() + 70 * 1000);
+  const hhmm = new Intl.DateTimeFormat("nl-BE", { timeZone: cfg.time_zone, hour: "2-digit", minute: "2-digit", hour12: false }).format(nu);
+  const entries = await (await fetch(BASE + "/api/config/config_entries/entry", { headers: H })).json();
+  const entry = entries.find((e) => e.domain === "btechnics_branding");
+  let f = await (await fetch(BASE + "/api/config/config_entries/options/flow", { method: "POST", headers: H, body: JSON.stringify({ handler: entry.entry_id }) })).json();
+  f = await (await fetch(BASE + "/api/config/config_entries/options/flow/" + f.flow_id, { method: "POST", headers: H,
+    body: JSON.stringify({ auto_update: true, auto_update_time: hhmm + ":00", auto_update_categories: ["system", "addons", "hacs", "firmware"], auto_update_backup: true }) })).json();
+  let last = null;
+  for (let i = 0; i < 30; i++) {
+    await sleep(5000);
+    last = (await (await fetch(BASE + "/api/btechnics_branding/health", { headers: H })).json()).auto_update_last;
+    if (last && last.trigger === "schema") break;
+  }
+  ok("Start zelf op het ingestelde uur", !!last && last.trigger === "schema", `${hhmm} ${cfg.time_zone} -> ${last ? last.trigger + " " + last.started : "niets"}`);
+}
 
 // ---------------------------------------------------------------- resultaat
 const fails = results.filter((x) => !x.pass);

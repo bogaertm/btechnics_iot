@@ -1,4 +1,11 @@
-"""Btechnics IOT Branding v1.30.0.
+"""Btechnics IOT Branding v1.31.0.
+
+v1.31.0:
+- Automatische updates, instelbaar in de opties: elke nacht op een gekozen uur
+  (standaard 04:00) worden Supervisor, apps, HACS en Core/OS bijgewerkt. Core
+  enkel vanaf x.1, altijd met back-up, en niet zolang de zelfcontrole een
+  probleem meldt. Zie auto_update.py. Service btechnics_branding.run_updates om
+  het meteen te starten of met dry_run te zien wat er zou gebeuren.
 
 v1.30.0:
 - Zelfcontrole na elke start: controleert of alle haken in HA nog werken
@@ -107,6 +114,8 @@ from homeassistant.const import __version__ as HA_VERSION
 from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
+
+from . import auto_update
 
 _LOGGER = logging.getLogger(__name__)
 DOMAIN = "btechnics_branding"
@@ -605,6 +614,17 @@ class BtechnicsBrandingHealthView(HomeAssistantView):
     def __init__(self, hass):
         self.hass = hass
 
+    async def get(self, request):
+        """Stand van de zelfcontrole en de laatste automatische update (admins)."""
+        user = request.get("hass_user")
+        if user is None or not user.is_admin:
+            return web.Response(status=403)
+        state = _health(self.hass)
+        return self.json({
+            "problems": sorted(state["backend"] | state["frontend"]),
+            "auto_update_last": self.hass.data.get("btechnics_branding_update_last"),
+        })
+
     async def post(self, request):
         user = request.get("hass_user")
         if user is None or not user.is_admin:
@@ -662,18 +682,23 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
         state["backend"] = _check_backend(hass)
         _update_issue(hass)
 
+    auto_update.register_services(hass, lambda: dict(entry.options))
+    auto_update.async_schedule(hass, dict(entry.options))
+
     if hass.is_running:
         hass.async_create_task(_delayed())
     else:
         hass.bus.async_listen_once("homeassistant_started", _delayed)
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    _LOGGER.info("BT: v1.30.0 klaar")
+    _LOGGER.info("BT: v1.31.0 klaar")
     return True
 
 
 async def async_update_listener(hass: HomeAssistant, entry) -> None:
-    pass
+    # Geen herlaad (de views en routes zijn al geregistreerd); enkel herplannen.
+    auto_update.async_schedule(hass, dict(entry.options))
 
 
 async def async_unload_entry(hass: HomeAssistant, entry) -> bool:
+    auto_update.async_unschedule(hass)
     return True

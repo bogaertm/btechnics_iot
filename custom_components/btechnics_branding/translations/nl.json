@@ -25,7 +25,11 @@
           "zoom_breakpoint": "Grens mobiel/desktop (px breedte)",
           "customer_logo": "Klantenlogo uploaden (png, jpg, svg, webp)",
           "customer_logo_scale": "Grootte klantenlogo (% van het Btechnics logo)",
-          "remove_customer_logo": "Klantenlogo verwijderen"
+          "remove_customer_logo": "Klantenlogo verwijderen",
+          "auto_update": "Automatische updates",
+          "auto_update_time": "Uur van de updates",
+          "auto_update_categories": "Wat mag automatisch bijgewerkt worden",
+          "auto_update_backup": "Back-up voor elke update"
         },
         "description": "Huidig klantenlogo: {customer_logo_status}"
       }
@@ -38,6 +42,28 @@
     "hooks_broken": {
       "title": "Btechnics IOT: branding na update deels buiten werking",
       "description": "Na de update naar versie {ha_version} werken deze onderdelen van de Btechnics IOT branding niet meer: {problems}.\n\nHet systeem zelf werkt gewoon; op die plaatsen kan het oorspronkelijke logo of de oorspronkelijke naam terug te zien zijn. Werk Btechnics IOT Features bij via HACS zodra er een nieuwe versie is, of contacteer Btechnics."
+    }
+  },
+  "selector": {
+    "auto_update_categories": {
+      "options": {
+        "system": "Systeem (Core vanaf x.1, OS, Supervisor)",
+        "addons": "Apps (add-ons)",
+        "hacs": "HACS integraties en kaarten",
+        "firmware": "Firmware van toestellen"
+      }
+    }
+  },
+  "services": {
+    "run_updates": {
+      "name": "Updates nu uitvoeren",
+      "description": "Installeert meteen de beschikbare updates volgens de instellingen van Btechnics IOT.",
+      "fields": {
+        "dry_run": {
+          "name": "Enkel tonen",
+          "description": "Toon wat er geinstalleerd zou worden, zonder iets te doen."
+        }
+      }
     }
   }
 }

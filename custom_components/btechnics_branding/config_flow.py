@@ -138,6 +138,19 @@ class BtechnicsBrandingOptionsFlow(config_entries.OptionsFlow):
         if has_logo:
             schema[vol.Optional("remove_customer_logo", default=False)] = bool
 
+        # Automatische updates
+        schema[vol.Optional("auto_update", default=current.get("auto_update", False))] = bool
+        schema[vol.Optional("auto_update_time", default=current.get("auto_update_time", "04:00:00"))] = selector.TimeSelector()
+        schema[vol.Optional("auto_update_categories", default=current.get("auto_update_categories", ["system", "addons", "hacs"]))] = selector.SelectSelector(
+            selector.SelectSelectorConfig(
+                options=["system", "addons", "hacs", "firmware"],
+                multiple=True,
+                mode=selector.SelectSelectorMode.LIST,
+                translation_key="auto_update_categories",
+            )
+        )
+        schema[vol.Optional("auto_update_backup", default=current.get("auto_update_backup", True))] = bool
+
         return self.async_show_form(
             step_id="init",
             data_schema=vol.Schema(schema),
