@@ -48,7 +48,7 @@ Service `btechnics_branding.run_updates` start het meteen; met `dry_run: true` z
 
 Vul in de opties de **sleutel van deze klant** in (aan te maken in de Work-app). Dan stuurt de installatie elk uur, en meteen bij een probleem, een korte status naar `https://work.btechnics.be/api/iot/status`: naam, versies, stand van de branding en openstaande of mislukte updates. Geen wachtwoorden, geen toestelgegevens. Zonder sleutel wordt niets verstuurd.
 
-Service `btechnics_branding.send_status` verstuurt meteen en toont wat er verstuurd werd.
+Service `btechnics_branding.send_status` verstuurt meteen en toont wat er verstuurd werd. Het adres moet met https:// beginnen (enkel een lokaal adres mag http). Beide services (`run_updates` en `send_status`) zijn enkel voor beheerders.
 
 ## Diagnose en verwijderen
 

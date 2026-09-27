@@ -64,6 +64,8 @@ _DATA_UNSUB = "btechnics_branding_update_unsub"
 _DATA_LAST = "btechnics_branding_update_last"
 _DATA_TRACKER = "btechnics_branding_update_tracker"
 _DATA_VIS_UNSUB = "btechnics_branding_update_vis_unsub"
+_DATA_LOCK = "btechnics_branding_update_lock"
+_DATA_GETOPTS = "btechnics_branding_update_getopts"
 MAX_ATTEMPTS = 2
 FAILED_ISSUE_PREFIX = "update_failed_"
 _INSTALL_TIMEOUT = 45 * 60  # een app of Core update mag lang duren
@@ -242,8 +244,22 @@ def _log(hass: HomeAssistant, message: str) -> None:
         pass
 
 
+def _lock(hass: HomeAssistant) -> asyncio.Lock:
+    """v1.33.1: een run tegelijk (nachtelijk en manueel), anders dubbele installaties."""
+    return hass.data.setdefault(_DATA_LOCK, asyncio.Lock())
+
+
 async def async_run(hass: HomeAssistant, options: dict, trigger: str = "schema") -> dict:
     """Voer de updates uit. Geeft een samenvatting terug (ook voor tests)."""
+    lock = _lock(hass)
+    if lock.locked():
+        _LOGGER.warning("BT auto-update: er loopt al een run, %s overgeslagen", trigger)
+        return {"trigger": trigger, "stopped": "er loopt al een run"}
+    async with lock:
+        return await _async_run_locked(hass, options, trigger)
+
+
+async def _async_run_locked(hass: HomeAssistant, options: dict, trigger: str) -> dict:
     result: dict[str, Any] = {
         "started": dt_util.now().isoformat(), "trigger": trigger,
         "installed": [], "failed": [], "skipped": [], "stopped": None,
@@ -264,7 +280,7 @@ async def async_run(hass: HomeAssistant, options: dict, trigger: str = "schema")
 
     use_backup = options.get(CONF_BACKUP, True)
     hacs_done = False
-    for upd in todo:
+    for index, upd in enumerate(todo):
         data: dict[str, Any] = {"entity_id": upd["entity_id"]}
         if use_backup and upd["backup"]:
             data["backup"] = True
@@ -290,11 +306,23 @@ async def async_run(hass: HomeAssistant, options: dict, trigger: str = "schema")
                 result["failed"].append(f"{label}: na installatie nog altijd {st.attributes.get('installed_version')}")
             if upd["kind"] == "hacs":
                 hacs_done = True
+        except TimeoutError:
+            result["failed"].append(f"{label}: duurde langer dan {_INSTALL_TIMEOUT // 60} minuten")
+            _LOGGER.warning("BT auto-update: %s duurde te lang", label)
         except Exception as err:  # noqa: BLE001
-            result["failed"].append(f"{label}: {err}")
+            result["failed"].append(f"{label}: {err or type(err).__name__}")
             _LOGGER.warning("BT auto-update: %s mislukt: %s", label, err)
+        else:
+            if upd["kind"] == "supervisor" and index + 1 < len(todo):
+                # v1.33.1: de Supervisor herstart zichzelf na een update. Wat nu volgt,
+                # zou falen en als mislukte poging tellen. De rest volgt de volgende nacht.
+                for rest in todo[index + 1:]:
+                    skipped.append(f"{rest['name']}: volgende nacht, Supervisor herstart")
+                break
 
-    async_sync_visibility(hass, options)
+    # v1.33.1: met de opties van nu (ze kunnen tijdens de run gewijzigd zijn)
+    getter = hass.data.get(_DATA_GETOPTS)
+    async_sync_visibility(hass, getter() if getter else options)
     summary = []
     if result["installed"]:
         summary.append("geinstalleerd: " + "; ".join(result["installed"]))
@@ -395,6 +423,7 @@ async def async_setup_visibility(hass: HomeAssistant, get_options) -> None:
         hass.data[_DATA_TRACKER] = tracker
     if unsub := hass.data.pop(_DATA_VIS_UNSUB, None):
         unsub()
+    hass.data[_DATA_GETOPTS] = get_options
 
     @callback
     def _filter(event_data) -> bool:
@@ -435,16 +464,9 @@ def async_schedule(hass: HomeAssistant, options: dict) -> None:
         _LOGGER.info("BT auto-update: uitgeschakeld")
         return
     at = _parse_time(options.get(CONF_TIME, DEFAULT_TIME))
-    running = {"busy": False}
 
     async def _fire(now: datetime) -> None:
-        if running["busy"]:
-            return
-        running["busy"] = True
-        try:
-            await async_run(hass, options, "schema")
-        finally:
-            running["busy"] = False
+        await async_run(hass, options, "schema")
 
     hass.data[_DATA_UNSUB] = async_track_time_change(
         hass, _fire, hour=at.hour, minute=at.minute, second=0
@@ -472,6 +494,9 @@ def register_services(hass: HomeAssistant, get_options) -> None:
                 "overgeslagen": skipped,
                 "branding_probleem": _branding_broken(hass),
             }
+        if _lock(hass).locked():
+            return {"gestart": [], "overgeslagen": [], "al_bezig": True,
+                    "branding_probleem": _branding_broken(hass)}
         # Een run kan lang duren (apps, Core). Op de achtergrond starten en
         # meteen antwoorden; het resultaat komt in Activiteit en het log.
         todo, skipped = plan(hass, options)
@@ -485,9 +510,11 @@ def register_services(hass: HomeAssistant, get_options) -> None:
         }
 
     from homeassistant.core import SupportsResponse
+    from homeassistant.helpers.service import async_register_admin_service
     import voluptuous as vol
-    hass.services.async_register(
-        DOMAIN, "run_updates", _run,
+    # v1.33.1: enkel beheerders (installeert updates en herstart het systeem)
+    async_register_admin_service(
+        hass, DOMAIN, "run_updates", _run,
         schema=vol.Schema({vol.Optional("dry_run", default=False): bool}),
         supports_response=SupportsResponse.OPTIONAL,
     )

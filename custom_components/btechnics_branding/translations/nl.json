@@ -37,7 +37,8 @@
       }
     },
     "error": {
-      "invalid_logo": "Bestand is geen geldige afbeelding (png, jpg, svg, webp of gif)."
+      "invalid_logo": "Bestand is geen geldige afbeelding (png, jpg, svg, webp of gif).",
+      "status_url_https": "Het adres moet met https:// beginnen."
     }
   },
   "issues": {

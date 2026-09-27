@@ -272,6 +272,53 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   ok("Update icoon: blijft na hertekenen", bgs.length > 0 && bgs.every((b) => b.includes("/btechnics_branding/app-icon-192.png")), "tussen " + JSON.stringify(tussen) + " na " + JSON.stringify(bgs));
   await page.screenshot({ path: process.env.SHOT || "/tmp/bt-updates.png", clip: { x: 256, y: 0, width: 1144, height: 500 } });
 
+  // v1.33.1: HACS draait in een iframe (zelfde domein) met eigen detailvenster.
+  // Nagebootst: iframe in een shadow root met een img en een state-badge zoals HACS ze maakt.
+  await page.evaluate(() => {
+    const host = document.createElement("div");
+    host.id = "bt-hacs-test";
+    const sr = host.attachShadow({ mode: "open" });
+    const f = document.createElement("iframe");
+    f.srcdoc = '<img id="i" src="https://brands.home-assistant.io/_/btechnics_branding/dark_icon.png">' +
+      '<state-badge id="b" style="display:block;width:40px;height:40px;background-image:url(https://brands.home-assistant.io/_/btechnics_branding/icon.png)"></state-badge>';
+    sr.appendChild(f);
+    document.body.appendChild(host);
+  });
+  await sleep(5000);
+  const inFrame = await page.evaluate(() => {
+    const d = document.getElementById("bt-hacs-test").shadowRoot.querySelector("iframe").contentDocument;
+    return { img: d.getElementById("i").getAttribute("src"), badge: d.getElementById("b").style.backgroundImage };
+  });
+  ok("HACS iframe: logo in lijst", /\/btechnics_branding\/app-icon-192\.png/.test(inFrame.img), inFrame.img);
+  ok("HACS iframe: logo in detailvenster", /\/btechnics_branding\/app-icon-192\.png/.test(inFrame.badge), inFrame.badge);
+  await page.evaluate(() => document.getElementById("bt-hacs-test").remove());
+
+  // v1.33.1: logo op de Info pagina (ha-logo-svg)
+  await page.goto(BASE + "/config/info"); await sleep(6000);
+  const info = await page.evaluate(() => {
+    const out = [];
+    const walk = (r) => r.querySelectorAll("*").forEach((el) => {
+      if (el.tagName === "HA-LOGO-SVG") out.push(!!(el.shadowRoot && el.shadowRoot.querySelector(".bt-inline-logo")));
+      if (el.shadowRoot) walk(el.shadowRoot);
+    });
+    walk(document);
+    return out;
+  });
+  ok("Info pagina: Btechnics logo", info.length > 0 && info.every(Boolean), JSON.stringify(info));
+  await page.goto(BASE + "/config/dashboard"); await sleep(6000);
+
+  // v1.33.1: een gewone gebruiker (geen beheerder) mag geen updates starten
+  const nu = await ws({ type: "config/auth/create", name: "Gewoon", group_ids: ["system-users"], local_only: false });
+  await ws({ type: "config/auth_provider/homeassistant/create", user_id: nu.user.id, username: "gewoon", password: "gewoon12345" });
+  let lf = await (await fetch(BASE + "/auth/login_flow", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client_id: CLIENT_ID, handler: ["homeassistant", null], redirect_uri: CLIENT_ID }) })).json();
+  lf = await (await fetch(BASE + "/auth/login_flow/" + lf.flow_id, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client_id: CLIENT_ID, username: "gewoon", password: "gewoon12345" }) })).json();
+  const ut = await (await fetch(BASE + "/auth/token", { method: "POST", body: new URLSearchParams({ grant_type: "authorization_code", code: lf.result, client_id: CLIENT_ID }) })).json();
+  const UH = { authorization: "Bearer " + ut.access_token, "content-type": "application/json" };
+  const r1 = await fetch(BASE + "/api/services/btechnics_branding/run_updates?return_response", { method: "POST", headers: UH, body: "{}" });
+  const r2 = await fetch(BASE + "/api/services/btechnics_branding/send_status?return_response", { method: "POST", headers: UH, body: "{}" });
+  ok("Gewone gebruiker: geen updates starten", !!ut.access_token && r1.status === 401, "run_updates " + r1.status);
+  ok("Gewone gebruiker: geen status versturen", !!ut.access_token && r2.status === 401, "send_status " + r2.status);
+
   const dry3 = await call(true);
   ok("Run 3: faalt niet meer geprobeerd", (dry3.zou_installeren || []).length === 0 && (dry3.overgeslagen || []).some((x) => /2 keer mislukt/.test(x)), JSON.stringify(dry3));
 
@@ -306,7 +353,10 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   const laatste = ontvangen[ontvangen.length - 1];
   ok("Status: verstuurd met sleutel", met && met.resultaat.ok === true && laatste && laatste.auth === "Bearer testsleutel", JSON.stringify(met && met.resultaat));
   const b = laatste ? laatste.body : {};
-  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.33.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
+  // v1.33.1: https verplicht (behalve lokaal adres)
+  const fout = await setOpts({ ...ALLES, status_url: "http://work.btechnics.be/api/iot/status", status_token: "testsleutel" });
+  ok("Status: http naar buiten geweigerd", fout.f.type === "form" && fout.f.errors && fout.f.errors.status_url === "status_url_https", JSON.stringify(fout.f.errors));
+  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.33.1" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
   ok("Status: geen sleutel in het bericht", !JSON.stringify(b).includes("testsleutel"));
 
   // Diagnose downloaden: zonder sleutel
@@ -325,6 +375,10 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   await sleep(14000);
   const melding = ontvangen.slice(voor).find((x) => x.body.branding && x.body.branding.ok === false);
   ok("Status: branding probleem meteen gemeld", !!melding && /branding/.test(melding.body.reason), JSON.stringify(ontvangen.slice(voor).map((x) => [x.body.sent_at, x.body.reason, x.body.branding])) + " post " + postAt);
+  // v1.33.1: sleutel leegmaken (de interface stuurt een leeg veld niet mee)
+  await setOpts({ ...ALLES, status_url: `http://${GW}:8999/status` }); await sleep(500);
+  const leeg = (await (await fetch(BASE + "/api/services/btechnics_branding/send_status?return_response", { method: "POST", headers: H, body: "{}" })).json()).service_response;
+  ok("Status: sleutel leegmaken stopt het versturen", leeg && leeg.resultaat.ok === false && /geen sleutel/.test(leeg.resultaat.error), JSON.stringify(leeg && leeg.resultaat));
   srv.close();
   await page.goto(BASE + "/config/dashboard"); await sleep(8000);
   await fetch(BASE + "/api/btechnics_branding/health", { method: "POST", headers: H, body: JSON.stringify({ problems: [] }) });
@@ -360,7 +414,7 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   fs.mkdirSync(logoDir, { recursive: true });
   fs.writeFileSync(path.join(logoDir, "customer_logo.png"), fs.readFileSync(path.join(COMP, "app-icon-192.png")));
   const del = await fetch(BASE + "/api/config/config_entries/entry/" + entry.entry_id, { method: "DELETE", headers: H });
-  await sleep(3000);
+  await sleep(6000);
   ok("Verwijderen: integratie weg", del.status === 200, String(del.status));
   ok("Verwijderen: tellingen opgeruimd", hadStore && !fs.existsSync(store), `voor ${hadStore} na ${fs.existsSync(store)}`);
   ok("Verwijderen: klantenlogo opgeruimd", !fs.existsSync(logoDir) || fs.readdirSync(logoDir).length === 0, fs.existsSync(logoDir) ? fs.readdirSync(logoDir).join(",") : "weg");

@@ -103,6 +103,16 @@ function deepQuery(root, selector) {
     found.push(...root.querySelectorAll(selector));
     for (const el of root.querySelectorAll('*')) {
       if (el.shadowRoot) { observeRoot(el.shadowRoot); found.push(...deepQuery(el.shadowRoot, selector)); }
+      // v1.33.1: HACS draait in een eigen iframe (zelfde domein). Ook daarin zoeken,
+      // anders blijft daar het "icon not available" icoon van de brands CDN staan.
+      if (el.tagName === "IFRAME") {
+        let doc = null;
+        try { doc = el.contentDocument; } catch(e) {}
+        if (doc && doc.documentElement) {
+          observeRoot(doc.documentElement);
+          found.push(...deepQuery(doc, selector));
+        }
+      }
     }
   } catch(e) {}
   return found;
@@ -313,7 +323,8 @@ function deepReplaceAttrs(root, from, to) {
 }
 
 function patchInlineLogos() {
-  deepQuery(document, "ha-logo-svg").forEach(swapSvgForIcon);
+  // v1.33.1: forEach gaf de index mee als "on"; de eerste (index 0) werd zo teruggezet
+  deepQuery(document, "ha-logo-svg").forEach(el => swapSvgForIcon(el, true));
   deepQuery(document, "ha-svg-icon").forEach(el => {
     const p = el.path || el.getAttribute("path") || "";
     swapSvgForIcon(el, p.startsWith(HA_PATH_PREFIX));
@@ -510,7 +521,7 @@ function patchAllInner() {
 // Wat voor onze vervanging in die cache belandde, bleef het HA huisje tonen,
 // ook al geeft de server nu het Btechnics logo. Eenmaal per versie halen we die
 // items uit alle caches; de service worker haalt ze dan opnieuw bij de server.
-const BT_VERSION = "1.32.1";
+const BT_VERSION = "1.33.1";
 const HA_CACHED_RE = new RegExp(
   "/static/(icons/(favicon|mask-icon|apple-touch-icon|maskable_icon|tile-win|logo_ohf|ohf)" +
   "|images/(home-assistant-logo|notification-badge|ohf-badge|open-home-foundation))" +

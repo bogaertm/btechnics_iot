@@ -26,6 +26,22 @@ CUSTOMER_LOGO_EXT = (".png", ".jpg", ".jpeg", ".svg", ".webp", ".gif")
 _LOGGER = logging.getLogger(__name__)
 
 
+def _status_url_ok(url: str) -> bool:
+    """v1.33.1: de sleutel enkel versleuteld versturen (https), behalve naar een lokaal adres."""
+    import ipaddress
+    from urllib.parse import urlparse
+
+    parts = urlparse((url or "").strip())
+    if parts.scheme == "https" and parts.hostname:
+        return True
+    if parts.scheme == "http" and parts.hostname:
+        try:
+            return ipaddress.ip_address(parts.hostname).is_private
+        except ValueError:
+            return False
+    return False
+
+
 def _customer_logo_dir(hass) -> pathlib.Path:
     return pathlib.Path(hass.config.path(CUSTOMER_LOGO_DIR))
 
@@ -91,9 +107,16 @@ class BtechnicsBrandingOptionsFlow(config_entries.OptionsFlow):
             options = dict(current)
             file_id = user_input.pop("customer_logo", None)
             remove = user_input.pop("remove_customer_logo", False)
+            # v1.33.1: een leeg veld stuurt de interface niet mee. Omdat de sleutel
+            # voorgevuld staat, betekent "ontbreekt" dus: bewust leeggemaakt.
+            token = (user_input.pop("status_token", "") or "").strip()
             options.update(user_input)
-            if not (options.get("status_token") or "").strip():
+            if token:
+                options["status_token"] = token
+            else:
                 options.pop("status_token", None)
+            if not _status_url_ok(options.get("status_url", "")):
+                errors["status_url"] = "status_url_https"
 
             if remove:
                 await self.hass.async_add_executor_job(_remove_customer_logo, self.hass)

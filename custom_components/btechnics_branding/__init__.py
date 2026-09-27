@@ -705,7 +705,7 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
     else:
         hass.bus.async_listen_once("homeassistant_started", _delayed)
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    _LOGGER.info("BT: v1.33.0 klaar")
+    _LOGGER.info("BT: v1.33.1 klaar")
     return True
 
 
@@ -720,6 +720,9 @@ async def async_unload_entry(hass: HomeAssistant, entry) -> bool:
     auto_update.async_unschedule(hass)
     auto_update.async_teardown_visibility(hass)
     status.async_teardown(hass)
+    # v1.33.1: services weg, anders werken ze verder met de oude instellingen
+    for service in ("run_updates", "send_status"):
+        hass.services.async_remove(DOMAIN, service)
     return True
 
 
@@ -738,4 +741,8 @@ async def async_remove_entry(hass: HomeAssistant, entry) -> None:
             _LOGGER.warning("BT: map %s niet verwijderd: %s", folder, err)
 
     await hass.async_add_executor_job(_cleanup)
-    await Store(hass, 1, f"{DOMAIN}.auto_update").async_remove()
+    # v1.33.1: via de Store van de tracker zelf, zodat een geplande bewaring
+    # het bestand niet opnieuw aanmaakt; tracker weg voor een latere herinstallatie
+    tracker = hass.data.pop(auto_update._DATA_TRACKER, None)  # noqa: SLF001
+    await (tracker._store if tracker else Store(hass, 1, f"{DOMAIN}.auto_update")).async_remove()  # noqa: SLF001
+    ir.async_delete_issue(hass, DOMAIN, _ISSUE_ID)

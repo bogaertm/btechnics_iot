@@ -135,14 +135,14 @@ async def async_send(hass: HomeAssistant, options: dict, reason: str) -> dict[st
     try:
         session = async_get_clientsession(hass)
         async with asyncio.timeout(_TIMEOUT_S):
-            resp = await session.post(
+            async with session.post(
                 url, json=payload,
                 headers={"Authorization": f"Bearer {token}", "User-Agent": f"btechnics-iot/{payload['versions']['integration']}"},
-            )
-            result["http"] = resp.status
-            result["ok"] = 200 <= resp.status < 300
-            if not result["ok"]:
-                result["error"] = (await resp.text())[:200]
+            ) as resp:
+                result["http"] = resp.status
+                result["ok"] = 200 <= resp.status < 300
+                if not result["ok"]:
+                    result["error"] = (await resp.text())[:200]
     except Exception as err:  # noqa: BLE001
         result.update(ok=False, error=str(err) or type(err).__name__)
     if not result.get("ok"):
@@ -203,10 +203,12 @@ def register_services(hass: HomeAssistant, get_options) -> None:
     if hass.services.has_service(DOMAIN, "send_status"):
         return
     from homeassistant.core import ServiceCall, SupportsResponse
+    from homeassistant.helpers.service import async_register_admin_service
 
     async def _send(call: ServiceCall) -> dict:
         options = get_options()
         result = await async_send(hass, options, "manueel")
         return {"resultaat": result, "bericht": await async_build(hass, options, "manueel")}
 
-    hass.services.async_register(DOMAIN, "send_status", _send, supports_response=SupportsResponse.OPTIONAL)
+    # v1.33.1: enkel beheerders (het antwoord toont de instellingen van Btechnics)
+    async_register_admin_service(hass, DOMAIN, "send_status", _send, supports_response=SupportsResponse.OPTIONAL)

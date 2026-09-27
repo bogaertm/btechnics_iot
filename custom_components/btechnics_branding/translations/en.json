@@ -37,7 +37,8 @@
       }
     },
     "error": {
-      "invalid_logo": "File is not a valid image (png, jpg, svg, webp or gif)."
+      "invalid_logo": "File is not a valid image (png, jpg, svg, webp or gif).",
+      "status_url_https": "The address must start with https://."
     }
   },
   "issues": {
