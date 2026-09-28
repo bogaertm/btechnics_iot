@@ -193,6 +193,51 @@ ok("Zelfcontrole maakt en wist melding", na1 === 1 && na2 === 0, `${na1} -> ${na
 const anon = await fetch(BASE + "/api/btechnics_branding/health", { method: "POST", body: "{}" });
 ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
 
+// ---------------------------------------------------------------- desktop-app downloaden (v1.36.0)
+// De links zelf worden pas getest als app-versie 3.7.0 gepubliceerd is.
+{
+  const MAC = "https://github.com/bogaertm/btechnics-iot-app/releases/latest/download/Btechnics-IOT-Mac.dmg";
+  const WIN = "https://github.com/bogaertm/btechnics-iot-app/releases/latest/download/Btechnics-IOT-Windows-Setup.exe";
+  const pr = await fetch(BASE + "/btechnics_branding/app");
+  const html = await pr.text();
+  ok("App: downloadpagina zonder aanmelding", pr.status === 200 && html.includes(MAC) && html.includes(WIN), String(pr.status));
+  ok("App: pagina afgeschermd (CSP, enkel binnen HA)", /frame-ancestors 'self'/.test(pr.headers.get("content-security-policy") || "") && pr.headers.get("x-content-type-options") === "nosniff");
+  await page.goto(BASE + "/config/dashboard"); await sleep(6000);
+  const panel = await page.evaluate(() => {
+    const ha = document.querySelector("home-assistant");
+    const p = ha.hass.panels["btechnics-app"];
+    const sb = ha.shadowRoot.querySelector("home-assistant-main").shadowRoot.querySelector("ha-sidebar");
+    const sr = sb.shadowRoot;
+    const item = sr.querySelector("#sidebar-panel-btechnics-app");
+    const after = sr.querySelector(".after-spacer");
+    const kids = after ? [...after.querySelectorAll("ha-list-item-button")].map((e) => e.id) : [];
+    return { p: p && { title: p.title, component_name: p.component_name, require_admin: p.require_admin },
+             aantal: sr.querySelectorAll("#sidebar-panel-btechnics-app").length,
+             tekst: item ? item.textContent.trim() : null,
+             onderaan: !!(item && after && after.contains(item)),
+             volgorde: kids };
+  });
+  ok("App: item 'IOT APP' in de zijbalk", !!panel.p && panel.p.component_name === "iframe" && panel.p.title === "IOT APP" && panel.tekst === "IOT APP" && panel.aantal === 1, JSON.stringify(panel));
+  ok("App: net boven Instellingen", panel.onderaan && panel.volgorde.indexOf("sidebar-panel-btechnics-app") === panel.volgorde.indexOf("sidebar-config") - 1, JSON.stringify(panel.volgorde));
+  ok("App: voor alle gebruikers (geen beheerder nodig)", !!panel.p && panel.p.require_admin === false);
+  await page.goto(BASE + "/btechnics-app"); await sleep(6000);
+  const plaats2 = await page.evaluate(() => {
+    const sr = document.querySelector("home-assistant").shadowRoot.querySelector("home-assistant-main").shadowRoot.querySelector("ha-sidebar").shadowRoot;
+    const after = sr.querySelector(".after-spacer");
+    return after ? [...after.querySelectorAll("ha-list-item-button")].map((e) => e.id) : [];
+  });
+  ok("App: ook na herladen meteen boven Instellingen", plaats2[0] === "sidebar-panel-btechnics-app" && plaats2[1] === "sidebar-config", JSON.stringify(plaats2));
+  const knoppen = await page.evaluate(() => {
+    const find = (r) => { const f = r.querySelector("iframe"); if (f) return f; for (const el of r.querySelectorAll("*")) if (el.shadowRoot) { const x = find(el.shadowRoot); if (x) return x; } return null; };
+    const f = find(document);
+    const d = f && f.contentDocument;
+    if (!d) return null;
+    return [...d.querySelectorAll("a.btn")].map((a) => ({ text: a.textContent.trim(), href: a.href, target: a.target }));
+  });
+  ok("App: twee knoppen met de vaste links", !!knoppen && knoppen.length === 2 && knoppen.some((k) => k.text === "Download voor Mac" && k.href === MAC && k.target === "_blank") && knoppen.some((k) => k.text === "Download voor Windows" && k.href === WIN && k.target === "_blank"), JSON.stringify(knoppen));
+  await page.screenshot({ path: (process.env.SHOT || "/tmp/bt.png").replace(/\.png$/, "_app.png") });
+}
+
 // ---------------------------------------------------------------- woordkeuze (v1.34.0)
 // Nederlandstalige browser: "woning", "je huis" en "Welkom thuis" worden neutraal.
 {
@@ -215,11 +260,13 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   await nlLogin.close();
 
   const nl = await browser.newContext({ locale: "nl-BE", viewport: { width: 1400, height: 900 } });
-  await nl.addInitScript((t) => { localStorage.setItem("hassTokens", JSON.stringify(t)); localStorage.setItem("selectedLanguage", JSON.stringify("nl")); }, stored);
+  await nl.addInitScript((t) => { localStorage.setItem("hassTokens", JSON.stringify(t)); localStorage.setItem("selectedLanguage", JSON.stringify("nl")); try { performance.setResourceTimingBufferSize(5000); } catch (e) {} }, stored);
   const np = await nl.newPage();
   await np.goto(BASE + "/config/dashboard"); await sleep(8000);
   const dt = await np.evaluate(deepText);
   const loc = await np.evaluate(async () => {
+    const find = () => performance.getEntriesByType("resource").map((e) => e.name).find((n) => /\/static\/translations\/config\/nl-[0-9a-f]+\.json/.test(n));
+    for (let i = 0; i < 40 && !find(); i++) await new Promise((r) => setTimeout(r, 500));
     const u = performance.getEntriesByType("resource").map((e) => e.name).find((n) => /\/static\/translations\/config\/nl-[0-9a-f]+\.json/.test(n));
     if (!u) return ["geen config vertaling geladen"];
     const d = await (await fetch(u)).json();
@@ -413,7 +460,7 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   // v1.33.1: https verplicht (behalve lokaal adres)
   const fout = await setOpts({ ...ALLES, status_url: "http://work.btechnics.be/api/iot/status", status_token: "testsleutel" });
   ok("Status: http naar buiten geweigerd", fout.f.type === "form" && fout.f.errors && fout.f.errors.status_url === "status_url_https", JSON.stringify(fout.f.errors));
-  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.35.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
+  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.36.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
   ok("Status: geen sleutel in het bericht", !JSON.stringify(b).includes("testsleutel"));
   {
     const fl = await (await fetch(BASE + "/api/config/config_entries/options/flow", { method: "POST", headers: H, body: JSON.stringify({ handler: entry.entry_id }) })).json();
@@ -638,6 +685,8 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   ok("Verwijderen: klantenlogo opgeruimd", !fs.existsSync(logoDir) || fs.readdirSync(logoDir).length === 0, fs.existsSync(logoDir) ? fs.readdirSync(logoDir).join(",") : "weg");
   const reg = await page.evaluate(() => document.querySelector("home-assistant").hass.callWS({ type: "config/entity_registry/get", entity_id: "update.test_faalt" }));
   ok("Verwijderen: niets meer verborgen", reg.hidden_by !== "integration", String(reg.hidden_by));
+  const nogPanel = await page.evaluate(() => !!document.querySelector("home-assistant").hass.panels["btechnics-app"]);
+  ok("Verwijderen: zijbalk-item weg", !nogPanel);
 }
 
 await browser.close();

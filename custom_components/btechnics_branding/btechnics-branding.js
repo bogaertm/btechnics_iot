@@ -500,12 +500,44 @@ function patchCloud() {
   }
 }
 
+// v1.36.0: "IOT APP" (downloadpagina desktop-app) onderaan de zijbalk, net boven
+// Instellingen. HA zet elk paneel in de bovenste lijst; het vaste deel onderaan
+// (Instellingen, Meldingen, gebruiker) tekent ha-sidebar zelf in _renderFixedPanels.
+// Wij halen ons paneel uit de bovenste lijst en tekenen het vooraan in het vaste
+// deel, met HA's eigen _renderPanel. Bestaan die functies niet meer (latere HA),
+// dan patchen we niets en blijft het item gewoon in de bovenste lijst staan.
+const BT_APP_PANEL = "btechnics-app";
+function patchSidebarAppItem() {
+  const S = customElements.get("ha-sidebar");
+  const P = S && S.prototype;
+  if (!P || P._btApp) return;
+  if (typeof P._renderPanels !== "function" || typeof P._renderFixedPanels !== "function" ||
+      typeof P._renderPanel !== "function") return;
+  const origPanels = P._renderPanels, origFixed = P._renderFixedPanels;
+  P._renderPanels = function (list, selected) {
+    return origPanels.call(this, (list || []).filter(p => !p || p.url_path !== BT_APP_PANEL), selected);
+  };
+  P._renderFixedPanels = function (selected) {
+    const rest = origFixed.call(this, selected);
+    const panel = this.hass && this.hass.panels && this.hass.panels[BT_APP_PANEL];
+    if (!panel) return rest;
+    let item;
+    try { item = this._renderPanel(panel, selected === BT_APP_PANEL); } catch (e) { return rest; }
+    return [item, rest];
+  };
+  P._btApp = true;
+  // ha-sidebar tekent enkel opnieuw bij bepaalde wijzigingen (shouldUpdate), dus
+  // melden we een wijziging van _panelOrder zodat het item meteen verhuist.
+  deepQuery(document, "ha-sidebar").forEach(el => { try { el.requestUpdate("_panelOrder", null); } catch (e) {} });
+}
+
 function patchAllInner() {
   disableSurvey();
   patchCloud();
   patchLaunchScreen();
   patchLoginPage();
   patchSidebar();
+  patchSidebarAppItem();
   patchInlineLogos();
   patchExternalLinks();
   patchColors();
@@ -521,7 +553,7 @@ function patchAllInner() {
 // Wat voor onze vervanging in die cache belandde, bleef het HA huisje tonen,
 // ook al geeft de server nu het Btechnics logo. Eenmaal per versie halen we die
 // items uit alle caches; de service worker haalt ze dan opnieuw bij de server.
-const BT_VERSION = "1.35.0";
+const BT_VERSION = "1.36.0";
 const HA_CACHED_RE = new RegExp(
   "/static/(icons/(favicon|mask-icon|apple-touch-icon|maskable_icon|tile-win|logo_ohf|ohf)" +
   "|images/(home-assistant-logo|notification-badge|ohf-badge|open-home-foundation))" +

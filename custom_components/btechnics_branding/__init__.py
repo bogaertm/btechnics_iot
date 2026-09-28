@@ -121,7 +121,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.util import dt as dt_util
 
-from . import auto_update, desktop, remote, status
+from . import app_download, auto_update, desktop, remote, status
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 
 _LOGGER = logging.getLogger(__name__)
@@ -712,6 +712,7 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
     hass.http.register_view(BtechnicsBrandingConfigView(hass))
     hass.http.register_view(BtechnicsBrandingCustomerLogoView(hass))
     hass.http.register_view(BtechnicsBrandingHealthView(hass))
+    hass.http.register_view(app_download.AppDownloadView())
 
     try:
         frontend.add_extra_js_url(hass, _JS_URL)
@@ -741,13 +742,14 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
     await status.async_setup(hass, lambda: dict(entry.options))
     await remote.async_setup(hass, entry)
     await desktop.async_setup(hass)
+    app_download.async_setup(hass)  # v1.36.0: zijbalk-item om de desktop-app te downloaden
 
     if hass.is_running:
         hass.async_create_task(_delayed())
     else:
         hass.bus.async_listen_once("homeassistant_started", _delayed)
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    _LOGGER.info("BT: v1.35.0 klaar")
+    _LOGGER.info("BT: v1.36.0 klaar")
     return True
 
 
@@ -764,6 +766,7 @@ async def async_unload_entry(hass: HomeAssistant, entry) -> bool:
     status.async_teardown(hass)
     remote.async_teardown(hass)
     desktop.async_unload(hass)
+    app_download.async_unload(hass)
     # v1.33.1: services weg, anders werken ze verder met de oude instellingen
     for service in ("run_updates", "send_status"):
         hass.services.async_remove(DOMAIN, service)
