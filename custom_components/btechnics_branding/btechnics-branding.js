@@ -465,23 +465,31 @@ function patchAll() {
 // 20 s na het laden kijken we of we de zijbalk en de systeemdata nog vinden en
 // melden dat aan de integratie (enkel admins). Die zet dan een melding onder
 // Instellingen > Reparaties, of haalt ze weg als alles weer werkt.
-const health = { sidebar: false, reported: false };
+// v1.37.0: alles in orde wordt meteen gemeld. Een probleem pas als de interface
+// 30 s zichtbaar op het scherm stond, en nooit vanuit een verborgen tab of scherm
+// (kiosk, achtergrond): daar kan de zijbalk ontbreken zonder dat er iets stuk is.
+const health = { sidebar: false, reported: false, since: 0 };
+let healthTimer = null;
 function reportHealth() {
   try {
     if (health.reported) return;
+    if (document.visibilityState !== "visible") { health.since = 0; return; }
     const ha = document.querySelector("home-assistant");
     const hass = ha && ha.hass;
     if (!hass || !hass.user || !hass.user.is_admin || !hass.callApi) return;
     // Enkel oordelen als de gewone interface er staat (geen login, geen onboarding)
-    if (!ha.shadowRoot || !ha.shadowRoot.querySelector("home-assistant-main")) return;
-    health.reported = true;
+    if (!ha.shadowRoot || !ha.shadowRoot.querySelector("home-assistant-main")) { health.since = 0; return; }
+    if (!health.since) health.since = Date.now();
     const problems = [];
     if (!health.sidebar) problems.push("sidebar");
     if (typeof hass.systemData === "undefined") problems.push("systemdata");
+    if (problems.length && Date.now() - health.since < 30000) return;
+    health.reported = true;
+    if (healthTimer) clearInterval(healthTimer);
     hass.callApi("POST", "btechnics_branding/health", { problems }).catch(() => {});
   } catch(e) {}
 }
-setTimeout(reportHealth, 20000);
+healthTimer = setInterval(reportHealth, 5000);
 
 // v1.29.1: HOME ASSISTANT CLOUD (NABU CASA) VERBERGEN.
 // Door de naamvervanging stond er "Btechnics IOT Cloud is een abonnementsdienst met
@@ -553,7 +561,7 @@ function patchAllInner() {
 // Wat voor onze vervanging in die cache belandde, bleef het HA huisje tonen,
 // ook al geeft de server nu het Btechnics logo. Eenmaal per versie halen we die
 // items uit alle caches; de service worker haalt ze dan opnieuw bij de server.
-const BT_VERSION = "1.36.0";
+const BT_VERSION = "1.37.0";
 const HA_CACHED_RE = new RegExp(
   "/static/(icons/(favicon|mask-icon|apple-touch-icon|maskable_icon|tile-win|logo_ohf|ohf)" +
   "|images/(home-assistant-logo|notification-badge|ohf-badge|open-home-foundation))" +

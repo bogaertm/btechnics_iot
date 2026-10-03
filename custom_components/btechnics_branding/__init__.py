@@ -599,7 +599,32 @@ _HEALTH_LABELS = {
 
 
 def _health(hass) -> dict:
-    return hass.data.setdefault(_HEALTH_KEY, {"backend": set(), "frontend": set()})
+    return hass.data.setdefault(_HEALTH_KEY, {"backend": set(), "frontend": set(), "ok_version": None, "store": None})
+
+
+# v1.37.0: een scherm dat de zijbalk niet vindt (kiosk, verborgen of traag
+# toestel) gaf een valse melding "branding werkt niet meer". Een echte breuk
+# komt na een update en zit dan op elk scherm. Daarom: zodra een scherm op deze
+# combinatie van HA en Btechnics IOT meldt dat alles werkt, is die versie
+# bevestigd. Latere probleemmeldingen van een enkel scherm op een bevestigde
+# versie worden genegeerd (enkel gelogd). Na een update begint het opnieuw.
+_BT_VERSION = "1.37.0"
+_HEALTH_STORE = f"{DOMAIN}.health"
+
+
+def _version_key() -> str:
+    return f"{HA_VERSION}|{_BT_VERSION}"
+
+
+async def _load_health(hass) -> None:
+    from homeassistant.helpers.storage import Store
+
+    state = _health(hass)
+    if state["store"] is not None:
+        return
+    state["store"] = Store(hass, 1, _HEALTH_STORE)
+    data = await state["store"].async_load() or {}
+    state["ok_version"] = data.get("ok_version") if isinstance(data, dict) else None
 
 
 def _route_marked(app: web.Application, canonical: str, mark: str) -> bool:
@@ -673,6 +698,7 @@ class BtechnicsBrandingHealthView(HomeAssistantView):
             "problems": sorted(state["backend"] | state["frontend"]),
             "auto_update_last": self.hass.data.get("btechnics_branding_update_last"),
             "status_last": (self.hass.data.get("btechnics_branding_status") or {}).get("last"),
+            "bevestigd": state.get("ok_version") == _version_key(),
         })
 
     async def post(self, request):
@@ -688,6 +714,14 @@ class BtechnicsBrandingHealthView(HomeAssistantView):
         allowed = {"sidebar", "systemdata", "launch"}
         found = {p for p in data.get("problems", []) if isinstance(p, str) and p in allowed}
         state = _health(self.hass)
+        if not found and state.get("ok_version") != _version_key():
+            state["ok_version"] = _version_key()
+            if state.get("store") is not None:
+                state["store"].async_delay_save(lambda: {"ok_version": state["ok_version"]}, 5)
+        elif found and state.get("ok_version") == _version_key():
+            _LOGGER.info("BT zelfcontrole: een scherm meldt %s, maar deze versie werkte al; genegeerd",
+                         sorted(found))
+            return self.json({"ok": True, "genegeerd": True})
         if found != state["frontend"]:
             state["frontend"] = found
             _update_issue(self.hass)
@@ -711,6 +745,7 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
     hass.http.register_view(BtechnicsBrandingJsView())
     hass.http.register_view(BtechnicsBrandingConfigView(hass))
     hass.http.register_view(BtechnicsBrandingCustomerLogoView(hass))
+    await _load_health(hass)
     hass.http.register_view(BtechnicsBrandingHealthView(hass))
     hass.http.register_view(app_download.AppDownloadView())
 
@@ -749,7 +784,7 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
     else:
         hass.bus.async_listen_once("homeassistant_started", _delayed)
     entry.async_on_unload(entry.add_update_listener(async_update_listener))
-    _LOGGER.info("BT: v1.36.0 klaar")
+    _LOGGER.info("BT: v%s klaar", _BT_VERSION)
     return True
 
 
@@ -794,4 +829,7 @@ async def async_remove_entry(hass: HomeAssistant, entry) -> None:
     await (tracker._store if tracker else Store(hass, 1, f"{DOMAIN}.auto_update")).async_remove()  # noqa: SLF001
     await remote.async_remove(hass)
     await desktop.async_remove(hass)
+    health_store = _health(hass).get("store")
+    hass.data.pop(_HEALTH_KEY, None)
+    await (health_store or Store(hass, 1, _HEALTH_STORE)).async_remove()
     ir.async_delete_issue(hass, DOMAIN, _ISSUE_ID)

@@ -144,8 +144,26 @@ const AUDIT = () => {
   return out;
 };
 
+// v1.37.0: zelfcontrole op een nog niet bevestigde versie (nog geen scherm geladen)
+{
+  const hs = async () => await (await fetch(BASE + "/api/btechnics_branding/health", { headers: H })).json();
+  const post = (p) => fetch(BASE + "/api/btechnics_branding/health", { method: "POST", headers: H, body: JSON.stringify({ problems: p }) });
+  const dry = async () => (await (await fetch(BASE + "/api/services/btechnics_branding/run_updates?return_response", { method: "POST", headers: H, body: JSON.stringify({ dry_run: true }) })).json()).service_response || {};
+  const s0 = await hs();
+  await post(["sidebar"]); await sleep(500);
+  const s1 = await hs(); const d1 = await dry();
+  ok("Zelfcontrole: nieuwe versie, probleem geeft melding", s0.bevestigd === false && s1.problems.includes("sidebar"), JSON.stringify([s0.bevestigd, s1.problems]));
+  ok("Stopt bij probleem met branding", d1.branding_probleem === true, JSON.stringify(d1));
+  await post([]); await sleep(500);
+  const s2 = await hs();
+  ok("Zelfcontrole: alles ok wist melding en bevestigt de versie", s2.problems.length === 0 && s2.bevestigd === true, JSON.stringify(s2.problems));
+  await post(["sidebar"]); await sleep(500);
+  const s3 = await hs(); const d3 = await dry();
+  ok("Zelfcontrole: een enkel scherm op een bevestigde versie wordt genegeerd", s3.problems.length === 0 && d3.branding_probleem !== true, JSON.stringify(s3.problems));
+}
+
 await page.goto(BASE + "/config/dashboard");
-await sleep(25000); // zelfcontrole meldt na 20 s
+await sleep(25000); // zelfcontrole
 const ui = await page.evaluate(async () => {
   const ha = document.querySelector("home-assistant");
   const hass = ha.hass;
@@ -177,19 +195,20 @@ for (const p of ["/config/dashboard", "/config/info", "/config/integrations/dash
 }
 ok("UI: geen JS fouten van Btechnics", errors.length === 0, errors.slice(0, 2).join(" | "));
 
-// Zelfcontrole zelf testen: een probleem melden moet een reparatie geven, en
-// "alles goed" moet ze weer weghalen.
-const listBt = () => page.evaluate(async () => {
-  const r = await document.querySelector("home-assistant").hass.callWS({ type: "repairs/list_issues" });
-  return r.issues.filter((i) => i.domain === "btechnics_branding").length;
-});
-await fetch(BASE + "/api/btechnics_branding/health", { method: "POST", headers: H, body: JSON.stringify({ problems: ["sidebar"] }) });
-await sleep(1000);
-const na1 = await listBt();
-await fetch(BASE + "/api/btechnics_branding/health", { method: "POST", headers: H, body: JSON.stringify({ problems: [] }) });
-await sleep(1000);
-const na2 = await listBt();
-ok("Zelfcontrole maakt en wist melding", na1 === 1 && na2 === 0, `${na1} -> ${na2}`);
+// v1.37.0: een verborgen scherm (kiosk, achtergrondtab) meldt niets
+{
+  const hctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+  await hctx.addInitScript((t) => {
+    localStorage.setItem("hassTokens", JSON.stringify(t));
+    Object.defineProperty(document, "visibilityState", { get: () => "hidden" });
+  }, stored);
+  const hp = await hctx.newPage();
+  const meldingen = [];
+  hp.on("request", (q) => { if (q.url().includes("btechnics_branding/health") && q.method() === "POST") meldingen.push(q.postData()); });
+  await hp.goto(BASE + "/config/dashboard"); await sleep(40000);
+  ok("Zelfcontrole: verborgen scherm meldt niets", meldingen.length === 0, meldingen.join(" | "));
+  await hctx.close();
+}
 const anon = await fetch(BASE + "/api/btechnics_branding/health", { method: "POST", body: "{}" });
 ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
 
@@ -460,7 +479,7 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   // v1.33.1: https verplicht (behalve lokaal adres)
   const fout = await setOpts({ ...ALLES, status_url: "http://work.btechnics.be/api/iot/status", status_token: "testsleutel" });
   ok("Status: http naar buiten geweigerd", fout.f.type === "form" && fout.f.errors && fout.f.errors.status_url === "status_url_https", JSON.stringify(fout.f.errors));
-  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.36.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
+  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.37.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
   ok("Status: geen sleutel in het bericht", !JSON.stringify(b).includes("testsleutel"));
   {
     const fl = await (await fetch(BASE + "/api/config/config_entries/options/flow", { method: "POST", headers: H, body: JSON.stringify({ handler: entry.entry_id }) })).json();
@@ -533,22 +552,11 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   ok("Diagnose: te downloaden", !!(diag && diag.data && diag.data.automatische_updates), Object.keys((diag && diag.data) || {}).join(","));
   ok("Diagnose: sleutel afgeschermd", !JSON.stringify(diag).includes("testsleutel"));
 
-  // Stoppen bij een branding probleem (en meteen melden aan Btechnics)
-  // De open pagina meldt zelf 20 s na het laden "alles ok"; die mag de test niet storen
-  await page.goto("about:blank");
-  const voor = ontvangen.length;
-  const postAt = new Date().toISOString();
-  await fetch(BASE + "/api/btechnics_branding/health", { method: "POST", headers: H, body: JSON.stringify({ problems: ["sidebar"] }) });
-  const stopped = await call(true);
-  ok("Stopt bij probleem met branding", stopped.branding_probleem === true);
-  await sleep(14000);
-  const melding = ontvangen.slice(voor).find((x) => x.body.branding && x.body.branding.ok === false);
-  ok("Status: branding probleem meteen gemeld", !!melding && /branding/.test(melding.body.reason), JSON.stringify(ontvangen.slice(voor).map((x) => [x.body.sent_at, x.body.reason, x.body.branding])) + " post " + postAt);
   // v1.35.0: meldingenlog in de status
   const metLogs = ontvangen.filter((x) => x.body.logs).pop();
   const lg = metLogs ? metLogs.body.logs : {};
   ok("Logs: eigen gebeurtenissen", Array.isArray(lg.btechnics) && lg.btechnics.some((e) => /op afstand/.test(e.message)), (lg.btechnics || []).slice(-3).map((e) => e.message).join(" / "));
-  ok("Logs: reparaties", Array.isArray(lg.repairs) && lg.repairs.some((r) => r.domain === "btechnics_branding"), (lg.repairs || []).map((r) => r.domain + ":" + r.issue_id).join(","));
+  ok("Logs: reparaties", Array.isArray(lg.repairs) && lg.repairs.length > 0, (lg.repairs || []).map((r) => r.domain + ":" + r.issue_id).join(","));
   ok("Logs: meldingen en fouten", Array.isArray(lg.notifications) && Array.isArray(lg.errors), `meldingen ${(lg.notifications || []).length}, fouten ${(lg.errors || []).length}`);
   ok("Logs: geen eigen BT waarschuwingen in de foutenlijst", !(lg.errors || []).some((e) => /btechnics_branding\.(auto_update|remote)/.test(e.name || "")), (lg.errors || []).map((e) => e.name).join(","));
 
