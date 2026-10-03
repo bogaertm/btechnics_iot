@@ -608,7 +608,7 @@ def _health(hass) -> dict:
 # combinatie van HA en Btechnics IOT meldt dat alles werkt, is die versie
 # bevestigd. Latere probleemmeldingen van een enkel scherm op een bevestigde
 # versie worden genegeerd (enkel gelogd). Na een update begint het opnieuw.
-_BT_VERSION = "1.37.0"
+_BT_VERSION = "1.38.0"
 _HEALTH_STORE = f"{DOMAIN}.health"
 
 
@@ -699,6 +699,7 @@ class BtechnicsBrandingHealthView(HomeAssistantView):
             "auto_update_last": self.hass.data.get("btechnics_branding_update_last"),
             "status_last": (self.hass.data.get("btechnics_branding_status") or {}).get("last"),
             "bevestigd": state.get("ok_version") == _version_key(),
+            "laatste_probleem": state.get("last_problem"),
         })
 
     async def post(self, request):
@@ -714,13 +715,30 @@ class BtechnicsBrandingHealthView(HomeAssistantView):
         allowed = {"sidebar", "systemdata", "launch"}
         found = {p for p in data.get("problems", []) if isinstance(p, str) and p in allowed}
         state = _health(self.hass)
+        if found:
+            # v1.38.0: welk scherm meldt dit? In het HA logboek en in de status (Work-app).
+            client = data.get("client") if isinstance(data.get("client"), dict) else {}
+            clean = {k: re.sub(r"[<>\x00-\x1f]", "", str(client.get(k) or ""))[:200]
+                     for k in ("user", "agent", "page", "screen", "found")}
+            clean["ip"] = str(request.remote or "")[:60]
+            state["last_problem"] = {"at": dt_util.utcnow().isoformat(), "problems": sorted(found), **clean}
+            ignored = state.get("ok_version") == _version_key()
+            _LOGGER.warning(
+                "BT zelfcontrole: scherm meldt %s%s. Gebruiker %s, IP %s, pagina %s, scherm %s, gevonden %s, toestel %s",
+                sorted(found), " (genegeerd, deze versie werkte al)" if ignored else "",
+                clean["user"], clean["ip"], clean["page"], clean["screen"], clean["found"], clean["agent"],
+            )
+            auto_update._log(  # noqa: SLF001
+                self.hass,
+                f"zelfcontrole: {', '.join(sorted(found))} gemeld door {clean['user'] or '?'} "
+                f"({clean['ip']}, {clean['screen']}, {clean['agent'][:80]})"
+                + (", genegeerd" if ignored else ""),
+            )
         if not found and state.get("ok_version") != _version_key():
             state["ok_version"] = _version_key()
             if state.get("store") is not None:
                 state["store"].async_delay_save(lambda: {"ok_version": state["ok_version"]}, 5)
         elif found and state.get("ok_version") == _version_key():
-            _LOGGER.info("BT zelfcontrole: een scherm meldt %s, maar deze versie werkte al; genegeerd",
-                         sorted(found))
             return self.json({"ok": True, "genegeerd": True})
         if found != state["frontend"]:
             state["frontend"] = found

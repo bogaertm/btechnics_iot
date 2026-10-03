@@ -150,18 +150,18 @@ const AUDIT = () => {
   const post = (p) => fetch(BASE + "/api/btechnics_branding/health", { method: "POST", headers: H, body: JSON.stringify({ problems: p }) });
   const dry = async () => (await (await fetch(BASE + "/api/services/btechnics_branding/run_updates?return_response", { method: "POST", headers: H, body: JSON.stringify({ dry_run: true }) })).json()).service_response || {};
   const s0 = await hs();
-  await post(["sidebar"]); await sleep(500);
+  await fetch(BASE + "/api/btechnics_branding/health", { method: "POST", headers: H, body: JSON.stringify({ problems: ["sidebar"], client: { user: "Testscherm", agent: "touchkio/1.6.0 <script>", page: "/home", screen: "800x480", found: "main,drawer,-sidebar,-shadow,-title" } }) });
+  await sleep(500);
   const s1 = await hs(); const d1 = await dry();
+  const lp = s1.laatste_probleem || {};
+  ok("Zelfcontrole: welk scherm het meldt wordt bewaard", lp.user === "Testscherm" && /touchkio/.test(lp.agent) && !/[<>]/.test(lp.agent) && lp.screen === "800x480" && /-sidebar/.test(lp.found) && !!lp.ip, JSON.stringify(lp));
   ok("Zelfcontrole: nieuwe versie, probleem geeft melding", s0.bevestigd === false && s1.problems.includes("sidebar"), JSON.stringify([s0.bevestigd, s1.problems]));
   ok("Stopt bij probleem met branding", d1.branding_probleem === true, JSON.stringify(d1));
-  await post([]); await sleep(500);
-  const s2 = await hs();
-  ok("Zelfcontrole: alles ok wist melding en bevestigt de versie", s2.problems.length === 0 && s2.bevestigd === true, JSON.stringify(s2.problems));
-  await post(["sidebar"]); await sleep(500);
-  const s3 = await hs(); const d3 = await dry();
-  ok("Zelfcontrole: een enkel scherm op een bevestigde versie wordt genegeerd", s3.problems.length === 0 && d3.branding_probleem !== true, JSON.stringify(s3.problems));
 }
 
+// v1.38.0: het scherm zelf moet "alles ok" melden (niet de test via de API)
+const paginaMeldingen = [];
+page.on("request", (q) => { if (q.url().includes("btechnics_branding/health") && q.method() === "POST") paginaMeldingen.push(q.postData()); });
 await page.goto(BASE + "/config/dashboard");
 await sleep(25000); // zelfcontrole
 const ui = await page.evaluate(async () => {
@@ -184,6 +184,15 @@ ok("UI: tekst in zijbalk", ui.sidebarText === "Btechnics IOT", ui.sidebarText);
 ok("UI: petrol als primaire kleur", ui.primary.toLowerCase() === "#00222b", ui.primary);
 ok("UI: enquete uit", ui.survey);
 ok("UI: zelfcontrole zonder melding", ui.btIssues.length === 0, ui.btIssues.join("; "));
+{
+  const hs = async () => await (await fetch(BASE + "/api/btechnics_branding/health", { headers: H })).json();
+  const s2 = await hs();
+  ok("Zelfcontrole: het scherm meldt zelf alles ok en bevestigt de versie", paginaMeldingen.some((b) => JSON.parse(b || "{}").problems?.length === 0) && s2.problems.length === 0 && s2.bevestigd === true, JSON.stringify({ pagina: paginaMeldingen, s2: s2.problems, b: s2.bevestigd }));
+  await fetch(BASE + "/api/btechnics_branding/health", { method: "POST", headers: H, body: JSON.stringify({ problems: ["sidebar"] }) }); await sleep(500);
+  const s3 = await hs();
+  const d3 = (await (await fetch(BASE + "/api/services/btechnics_branding/run_updates?return_response", { method: "POST", headers: H, body: JSON.stringify({ dry_run: true }) })).json()).service_response || {};
+  ok("Zelfcontrole: een enkel scherm op een bevestigde versie wordt genegeerd", s3.problems.length === 0 && d3.branding_probleem !== true, JSON.stringify(s3.problems));
+}
 
 for (const p of ["/config/dashboard", "/config/info", "/config/integrations/dashboard", "/config/voice-assistants/assistants", "/logbook"]) {
   await page.goto(BASE + p);
@@ -479,7 +488,7 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   // v1.33.1: https verplicht (behalve lokaal adres)
   const fout = await setOpts({ ...ALLES, status_url: "http://work.btechnics.be/api/iot/status", status_token: "testsleutel" });
   ok("Status: http naar buiten geweigerd", fout.f.type === "form" && fout.f.errors && fout.f.errors.status_url === "status_url_https", JSON.stringify(fout.f.errors));
-  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.37.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
+  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.38.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
   ok("Status: geen sleutel in het bericht", !JSON.stringify(b).includes("testsleutel"));
   {
     const fl = await (await fetch(BASE + "/api/config/config_entries/options/flow", { method: "POST", headers: H, body: JSON.stringify({ handler: entry.entry_id }) })).json();

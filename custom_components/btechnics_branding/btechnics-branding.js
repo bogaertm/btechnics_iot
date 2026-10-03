@@ -486,7 +486,24 @@ function reportHealth() {
     if (problems.length && Date.now() - health.since < 30000) return;
     health.reported = true;
     if (healthTimer) clearInterval(healthTimer);
-    hass.callApi("POST", "btechnics_branding/health", { problems }).catch(() => {});
+    const body = { problems };
+    // v1.38.0: bij een probleem meesturen welk scherm het meldt en wat er ontbrak,
+    // zodat een vals alarm naar het juiste toestel te herleiden is.
+    if (problems.length) {
+      const main = ha.shadowRoot.querySelector("home-assistant-main");
+      const drawer = main && main.shadowRoot && main.shadowRoot.querySelector("ha-drawer");
+      const sb = drawer && drawer.querySelector("ha-sidebar");
+      body.client = {
+        user: String(hass.user.name || "").slice(0, 60),
+        agent: String(navigator.userAgent || "").slice(0, 200),
+        page: String(location.pathname || "").slice(0, 100),
+        screen: innerWidth + "x" + innerHeight,
+        found: [main ? "main" : "-main", drawer ? "drawer" : "-drawer", sb ? "sidebar" : "-sidebar",
+                sb && sb.shadowRoot ? "shadow" : "-shadow",
+                sb && sb.shadowRoot && sb.shadowRoot.querySelector(".title") ? "title" : "-title"].join(","),
+      };
+    }
+    hass.callApi("POST", "btechnics_branding/health", body).catch(() => {});
   } catch(e) {}
 }
 healthTimer = setInterval(reportHealth, 5000);
@@ -561,7 +578,7 @@ function patchAllInner() {
 // Wat voor onze vervanging in die cache belandde, bleef het HA huisje tonen,
 // ook al geeft de server nu het Btechnics logo. Eenmaal per versie halen we die
 // items uit alle caches; de service worker haalt ze dan opnieuw bij de server.
-const BT_VERSION = "1.37.0";
+const BT_VERSION = "1.38.0";
 const HA_CACHED_RE = new RegExp(
   "/static/(icons/(favicon|mask-icon|apple-touch-icon|maskable_icon|tile-win|logo_ohf|ohf)" +
   "|images/(home-assistant-logo|notification-badge|ohf-badge|open-home-foundation))" +
