@@ -578,7 +578,7 @@ function patchAllInner() {
 // Wat voor onze vervanging in die cache belandde, bleef het HA huisje tonen,
 // ook al geeft de server nu het Btechnics logo. Eenmaal per versie halen we die
 // items uit alle caches; de service worker haalt ze dan opnieuw bij de server.
-const BT_VERSION = "1.38.0";
+const BT_VERSION = "1.39.0";
 const HA_CACHED_RE = new RegExp(
   "/static/(icons/(favicon|mask-icon|apple-touch-icon|maskable_icon|tile-win|logo_ohf|ohf)" +
   "|images/(home-assistant-logo|notification-badge|ohf-badge|open-home-foundation))" +

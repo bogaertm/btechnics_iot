@@ -488,7 +488,7 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   // v1.33.1: https verplicht (behalve lokaal adres)
   const fout = await setOpts({ ...ALLES, status_url: "http://work.btechnics.be/api/iot/status", status_token: "testsleutel" });
   ok("Status: http naar buiten geweigerd", fout.f.type === "form" && fout.f.errors && fout.f.errors.status_url === "status_url_https", JSON.stringify(fout.f.errors));
-  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.38.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
+  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.39.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
   ok("Status: geen sleutel in het bericht", !JSON.stringify(b).includes("testsleutel"));
   {
     const fl = await (await fetch(BASE + "/api/config/config_entries/options/flow", { method: "POST", headers: H, body: JSON.stringify({ handler: entry.entry_id }) })).json();
@@ -632,6 +632,17 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   const hlog = await (await fetch(BASE + "/api/error_log", { headers: H })).text().catch(() => "");
   ok("Gebruikers: wachtwoord nergens in het HA log", !hlog.includes("EenLangGenoegWachtwoord1") && !(nieuw && hlog.includes(nieuw.password)), "");
 
+  // v1.39.0: desktop-app die tijdens de opstart van HA verbindt (voor deze integratie
+  // geladen is) en daarna verbonden blijft, zoals de app na een HACS-update doet.
+  const appToken = await ws({ type: "auth/long_lived_access_token", client_name: "Btechnics IOT Herstarttest", lifespan: 30 });
+  const APP_UA = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Btechnics IOT/3.7.1 Chrome/138.0.0.0 Electron/37.2.0 Safari/537.36 BtechnicsIOT/3.7.1";
+  let appWs = null, appSince = 0, appAuth = [];
+  const appConnect = () => { try { if (appWs) appWs.close(); } catch {} appSince = Date.now();
+    appWs = new WebSocket(BASE.replace(/^http/, "ws") + "/api/websocket", { headers: { "User-Agent": APP_UA } });
+    appWs.onmessage = (e) => { const m = JSON.parse(e.data); if (m.type === "auth_required") appWs.send(JSON.stringify({ type: "auth", access_token: appToken })); if (m.type === "auth_ok") appAuth.push(Date.now()); };
+    appWs.onerror = () => {}; };
+  let appTimer = null;  // pas starten als HA neergaat: de eerste aanmelding valt dan in de opstart
+
   // v1.35.0: herstart op afstand (eerst configuratiecontrole). Toestel herstarten kan niet in een container.
   resultaten.length = 0;
   wachtrij.push({ id: "r1", type: "reboot_host" }, { id: "r2", type: "restart" }, { id: "r3", type: "send_status" });
@@ -642,11 +653,18 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   ok("Veilig: na een herstart niets meer uit dezelfde reeks", RR.r3 && RR.r3.ok === false && /overgeslagen/.test(RR.r3.error), JSON.stringify(RR.r3));
   let down = false, up = false;
   for (let i = 0; i < 40 && !down; i++) { try { const r = await fetch(BASE + "/api/", { headers: H, signal: AbortSignal.timeout(3000) }); if (r.status >= 500) down = true; } catch { down = true; } if (!down) await sleep(1500); }
+  appTimer = setInterval(() => { if (!appWs || appWs.readyState >= 2 || (appWs.readyState === 0 && Date.now() - appSince > 2000)) appConnect(); }, 300);
   for (let i = 0; i < 90 && down && !up; i++) { await sleep(3000); try { const r = await fetch(BASE + "/api/", { headers: H, signal: AbortSignal.timeout(3000) }); up = r.status === 200; } catch {} }
   ok("Op afstand: HA herstart en komt terug", down && up, `down ${down} up ${up}`);
   let startMsg = null;
   for (let i = 0; i < 30 && !startMsg; i++) { await sleep(3000); startMsg = ontvangen.filter((x) => /start/.test(x.body.reason || "")).pop(); }
   ok("Op afstand: status na herstart", !!startMsg, startMsg ? startMsg.body.reason : "niets");
+  {
+    const na = (await (await fetch(BASE + "/api/services/btechnics_branding/send_status?return_response", { method: "POST", headers: H, body: "{}" })).json()).service_response.bericht.desktop_apps || [];
+    const rij = na.find((r) => r.naam === "Btechnics IOT Herstarttest");
+    ok("Desktop: app die tijdens de opstart verbond staat in de lijst", !!rij && rij.app_versie === "3.7.1" && rij.platform === "windows" && !!rij.laatste_ip, JSON.stringify({ rij, aanmeldingen: appAuth.length }));
+    clearInterval(appTimer); try { appWs.close(); } catch {}
+  }
   // Dezelfde opdracht opnieuw aangeboden na de herstart: nooit een tweede keer
   resultaten.length = 0; opgehaald.length = 0;
   wachtrij.push({ id: "r2", type: "restart" });

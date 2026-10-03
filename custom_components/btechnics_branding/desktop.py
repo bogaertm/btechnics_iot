@@ -112,6 +112,64 @@ def _unwatch_tokens(hass: HomeAssistant) -> None:
         st["wrapper"] = None
 
 
+_UA_APP = re.compile(r"BtechnicsIOT/([0-9A-Za-z.+-]{1,32})")
+
+
+def _from_agent(agent: str) -> dict[str, Any]:
+    """App-versie en platform uit de User-Agent van het app-venster.
+
+    De app laadt HA met "<Electron UA> BtechnicsIOT/<versie>" (app main.js, loadURL).
+    """
+    out: dict[str, Any] = {}
+    if m := _UA_APP.search(agent or ""):
+        out["app_versie"] = m.group(1)
+        if "Windows" in agent:
+            out["platform"] = "windows"
+        elif "Macintosh" in agent or "Mac OS X" in agent:
+            out["platform"] = "macos"
+        if "arm64" in agent.lower() or "aarch64" in agent.lower():
+            out["architectuur"] = "arm64"
+    return out
+
+
+def _live_tokens(hass: HomeAssistant) -> dict[str, dict[str, Any]]:
+    """v1.39.0: tokens met een open WebSocket-verbinding nu, met IP en app-gegevens.
+
+    Waarom: na een herstart van HA (bv. na een HACS-update) staat de webserver al
+    open voor deze integratie geladen is. De desktop-app verbindt dan meteen
+    opnieuw en die ene aanmelding gebeurt voor _watch_tokens meekijkt. Daarna
+    blijft de verbinding dagen open zonder nieuwe aanmelding, en bleef de lijst leeg.
+
+    HA houdt per open WebSocket een "revoke callback" bij per token
+    (auth/__init__.py async_register_revoke_token_callback, gebruikt in
+    websocket_api/auth.py). Dat is interne HA-code: lukt het niet, dan valt dit
+    stil terug op enkel _watch_tokens.
+    """
+    out: dict[str, dict[str, Any]] = {}
+    try:
+        callbacks = getattr(hass.auth, "_revoke_callbacks", None) or {}
+        for token_id, cbs in list(callbacks.items()):
+            if not cbs:
+                continue
+            info: dict[str, Any] = {"ip": None}
+            for cb in list(cbs):
+                request = getattr(getattr(cb, "__self__", None), "_request", None)
+                if request is None:
+                    continue
+                if not info["ip"] and getattr(request, "remote", None):
+                    info["ip"] = str(request.remote)[:60]
+                try:
+                    agent = str(request.headers.get("User-Agent") or "")[:400]
+                except Exception:  # noqa: BLE001
+                    agent = ""
+                if "app_versie" not in info:
+                    info.update(_from_agent(agent))
+            out[token_id] = info
+    except Exception:  # noqa: BLE001
+        return {}
+    return out
+
+
 def _prune(apps: dict) -> dict:
     grens = dt_util.utcnow() - _KEEP
     keep = {}
@@ -124,7 +182,7 @@ def _prune(apps: dict) -> dict:
     return dict(items[-_MAX_APPS:])
 
 
-def _token_rows(user, seen: dict) -> list[tuple[Any, dict]]:
+def _token_rows(user, seen: dict, live: dict | None = None) -> list[tuple[Any, dict]]:
     rows = []
     for token in user.refresh_tokens.values():
         if token.token_type != "long_lived_access_token":
@@ -147,8 +205,11 @@ def _token_rows(user, seen: dict) -> list[tuple[Any, dict]]:
             "bron": "token",
             "naam": name[:64],
             "laatst_gezien": max(times).isoformat(),
-            "laatste_ip": token.last_used_ip,
-            "app_versie": None, "platform": None, "os_versie": None, "architectuur": None,
+            "laatste_ip": ((live or {}).get(token.id) or {}).get("ip") or token.last_used_ip,
+            "app_versie": ((live or {}).get(token.id) or {}).get("app_versie"),
+            "platform": ((live or {}).get(token.id) or {}).get("platform"),
+            "os_versie": None,
+            "architectuur": ((live or {}).get(token.id) or {}).get("architectuur"),
         }))
     return rows
 
@@ -162,8 +223,15 @@ async def async_list(hass: HomeAssistant) -> list[dict[str, Any]]:
     all_users = await hass.auth.async_get_users()
     existing = {t.id for u in all_users for t in u.refresh_tokens.values()}
     st["seen"] = {k: v for k, v in st["seen"].items() if k in existing}  # verwijderde tokens vergeten
+    # v1.39.0: wat nu verbonden is, telt als nu gezien
+    live = {k: v for k, v in _live_tokens(hass).items() if k in existing}
+    if live:
+        now = dt_util.utcnow().isoformat()
+        for token_id in live:
+            st["seen"][token_id] = now
+        _save(hass)
     for user in all_users:
-        rows = _token_rows(user, st["seen"])
+        rows = _token_rows(user, st["seen"], live)
         # Precies een gebruikt Btechnics IOT token en de app van die gebruiker meldt
         # zich aan: zelfde computer. Ongebruikte tokens tellen niet mee.
         if user.id in users_with_app and len(rows) == 1:
