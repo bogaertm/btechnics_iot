@@ -139,6 +139,8 @@ _ICON_192_URL = "/btechnics_branding/app-icon-192.png"
 _LOGO_SVG_FILE = str(_DIR / "logo.svg")
 _LOGO_SVG_URL = "/btechnics_branding/logo.svg"
 _FAVICON_ICO_FILE = str(_DIR / "favicon.ico")
+_FAVICON_ICO_URL = "/btechnics_branding/favicon.ico"
+_ICON_PNG_RE = re.compile(r"/static/icons/(?:favicon-(?:\d+x\d+|apple-\d+x\d+)|maskable_icon-\d+x\d+)\.png")
 _BRAND_LOGO_FILE = str(_DIR / "brand" / "logo.png")
 _BRAND_DARK_LOGO_FILE = str(_DIR / "brand" / "dark_logo.png")
 
@@ -342,6 +344,12 @@ def _patch_response(response, request_path: str, file_text: str | None = None):
     # beginscherm" op iPhone; application-name idem op Android/Windows.
     for old, new in _HTML_REPLACE:
         patched = patched.replace(old, new)
+    # v1.40.0: HA-iconen in de HTML naar eigen, geversioneerde adressen. Een browser
+    # die de site al eens opende voor de branding er was, bewaart het HA-icoon onder
+    # het oude adres (1 dag, iOS het "site-icoon" nog langer) en toonde dat verder,
+    # ook op het aanmeldscherm. Een nieuw adres wordt altijd opnieuw opgehaald.
+    patched = _ICON_PNG_RE.sub(f"{_ICON_192_URL}?v={_BT_VERSION}", patched)
+    patched = patched.replace('"/static/icons/favicon.ico"', f'"{_FAVICON_ICO_URL}?v={_BT_VERSION}"')
     _LOGGER.debug("BT: HTML gepatcht voor %s (auth=%s)", request_path, is_auth)
     return web.Response(
         text=patched,
@@ -608,7 +616,7 @@ def _health(hass) -> dict:
 # combinatie van HA en Btechnics IOT meldt dat alles werkt, is die versie
 # bevestigd. Latere probleemmeldingen van een enkel scherm op een bevestigde
 # versie worden genegeerd (enkel gelogd). Na een update begint het opnieuw.
-_BT_VERSION = "1.39.0"
+_BT_VERSION = "1.40.0"
 _HEALTH_STORE = f"{DOMAIN}.health"
 
 
@@ -755,6 +763,7 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
         await hass.http.async_register_static_paths([
             StaticPathConfig(_ICON_512_URL, _ICON_512_FILE, cache_headers=True),
             StaticPathConfig(_ICON_192_URL, _ICON_192_FILE, cache_headers=True),
+            StaticPathConfig(_FAVICON_ICO_URL, _FAVICON_ICO_FILE, cache_headers=True),
             StaticPathConfig(_LOGO_SVG_URL, _LOGO_SVG_FILE, cache_headers=True),
         ])
     except Exception as err:

@@ -83,6 +83,14 @@ ok("Aanmeldscherm: script en titel", auth.includes("btechnics-branding.js") && a
 const icon = fs.readFileSync(path.join(COMP, "app-icon-192.png"));
 ok("Static favicon vervangen", (await bytes("/static/icons/favicon-192x192.png")).equals(icon));
 ok("Static maskable icoon vervangen", (await bytes("/static/icons/maskable_icon-192x192.png")).equals(icon));
+// v1.40.0: geen HA-icoonadressen meer in de HTML (een browser kan die nog bewaard hebben)
+const authIcons = [...auth.matchAll(/(?:src|href)="([^"]*(?:icon|favicon)[^"]*)"/g)].map((m) => m[1]);
+const idxIcons = [...index.matchAll(/(?:src|href)="([^"]*(?:icon|favicon)[^"]*)"/g)].map((m) => m[1]);
+ok("Iconen: geen HA-adressen in index en aanmeldscherm", ![...authIcons, ...idxIcons].some((u) => /\/static\/icons\/favicon/.test(u)), JSON.stringify([...authIcons, ...idxIcons]));
+const ico = fs.readFileSync(path.join(COMP, "favicon.ico"));
+const vIco = authIcons.find((u) => u.startsWith("/btechnics_branding/favicon.ico?v="));
+const vPng = authIcons.find((u) => u.startsWith("/btechnics_branding/app-icon-192.png?v="));
+ok("Iconen: nieuwe adressen geven het Btechnics icoon", !!vIco && !!vPng && (await bytes(vIco)).equals(ico) && (await bytes(vPng)).equals(icon), `${vIco} ${vPng}`);
 const logo = fs.readFileSync(path.join(COMP, "logo.svg"));
 ok("Static HA logo vervangen", (await bytes("/static/images/home-assistant-logo-loading.svg")).equals(logo));
 
@@ -488,7 +496,7 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   // v1.33.1: https verplicht (behalve lokaal adres)
   const fout = await setOpts({ ...ALLES, status_url: "http://work.btechnics.be/api/iot/status", status_token: "testsleutel" });
   ok("Status: http naar buiten geweigerd", fout.f.type === "form" && fout.f.errors && fout.f.errors.status_url === "status_url_https", JSON.stringify(fout.f.errors));
-  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.39.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
+  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.40.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
   ok("Status: geen sleutel in het bericht", !JSON.stringify(b).includes("testsleutel"));
   {
     const fl = await (await fetch(BASE + "/api/config/config_entries/options/flow", { method: "POST", headers: H, body: JSON.stringify({ handler: entry.entry_id }) })).json();
