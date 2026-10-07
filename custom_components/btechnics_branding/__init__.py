@@ -526,6 +526,73 @@ def _patch_static_route(app: web.Application) -> None:
                 _LOGGER.warning("BT static patch fout: %s", e)
 
 
+# v1.41.0: het aanmeldscherm (authorize.<hash>.js) bevat zelf links naar
+# home-assistant.io ("Help", "Wachtwoord vergeten?", apps). Tot nu zette enkel
+# ons script die achteraf om; laadt dat traag of niet (gezien op een gsm), dan
+# stond er HA. Nu worden ze al op de server vervangen.
+_AUTH_BUNDLE_RE = re.compile(r"^/frontend_(latest|es5)/authorize\.[0-9a-f]+\.js$")
+_AUTH_LINKS = (
+    "https://www.home-assistant.io/docs/authentication/",
+    "https://www.home-assistant.io/docs/locked_out/#forgot-password",
+    "https://home-assistant.io/android",
+    "https://home-assistant.io/iOS",
+)
+_BT_SITE = "https://btechnics.be/"
+_AUTH_BUNDLE_CACHE: dict[str, bytes] = {}
+
+
+def _read_auth_bundle(path: str) -> bytes | None:
+    import hass_frontend
+
+    rel = path.lstrip("/")
+    full = pathlib.Path(hass_frontend.__file__).parent / rel
+    if not full.is_file():
+        return None
+    text = full.read_text("utf-8")
+    for link in _AUTH_LINKS:
+        text = text.replace(link, _BT_SITE)
+    return text.encode("utf-8")
+
+
+def _make_frontend_handler(original, hass):
+    async def handler(request):
+        if _AUTH_BUNDLE_RE.match(request.path):
+            body = _AUTH_BUNDLE_CACHE.get(request.path)
+            if body is None:
+                try:
+                    body = await hass.async_add_executor_job(_read_auth_bundle, request.path)
+                except Exception as err:  # noqa: BLE001
+                    _LOGGER.warning("BT: aanmeldscherm niet aangepast: %s", err)
+                    body = None
+                if body is not None:
+                    _AUTH_BUNDLE_CACHE[request.path] = body
+            if body is not None:
+                return web.Response(
+                    body=body, content_type="application/javascript", charset="utf-8",
+                    headers={"Cache-Control": "public, max-age=86400"},
+                )
+        return await original(request)
+    handler._bt_frontend_patched = True  # type: ignore[attr-defined]
+    return handler
+
+
+def _patch_frontend_route(hass, app: web.Application) -> None:
+    for resource in app.router.resources():
+        canonical = (getattr(resource, "canonical", "") or "").rstrip("/")
+        if canonical not in ("/frontend_latest", "/frontend_es5"):
+            continue
+        for route in resource:
+            if route.method not in ("GET", "*", "HEAD"):
+                continue
+            if getattr(route._handler, "_bt_frontend_patched", False):
+                continue
+            try:
+                route._handler = _make_frontend_handler(route._handler, hass)
+                _LOGGER.info("BT: frontend route gepatcht (%s)", canonical)
+            except Exception as e:  # noqa: BLE001
+                _LOGGER.warning("BT frontend patch fout: %s", e)
+
+
 _SKIP = (
     "/api/", "/static/", "/frontend_latest/", "/frontend_es5/",
     "/local/", "/hacsfiles/", "/_debugger", "/service_worker",
@@ -616,7 +683,7 @@ def _health(hass) -> dict:
 # combinatie van HA en Btechnics IOT meldt dat alles werkt, is die versie
 # bevestigd. Latere probleemmeldingen van een enkel scherm op een bevestigde
 # versie worden genegeerd (enkel gelogd). Na een update begint het opnieuw.
-_BT_VERSION = "1.40.0"
+_BT_VERSION = "1.41.0"
 _HEALTH_STORE = f"{DOMAIN}.health"
 
 
@@ -785,6 +852,7 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
     _patch_routes(hass.http.app)
     _patch_brands_route(hass.http.app)
     _patch_static_route(hass.http.app)
+    _patch_frontend_route(hass, hass.http.app)
 
     await _disable_onboarding_survey(hass)
 
@@ -793,6 +861,7 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
         _patch_routes(hass.http.app)
         _patch_brands_route(hass.http.app)
         _patch_static_route(hass.http.app)
+        _patch_frontend_route(hass, hass.http.app)
         state = _health(hass)
         state["backend"] = _check_backend(hass)
         _update_issue(hass)

@@ -578,7 +578,7 @@ function patchAllInner() {
 // Wat voor onze vervanging in die cache belandde, bleef het HA huisje tonen,
 // ook al geeft de server nu het Btechnics logo. Eenmaal per versie halen we die
 // items uit alle caches; de service worker haalt ze dan opnieuw bij de server.
-const BT_VERSION = "1.40.0";
+const BT_VERSION = "1.41.0";
 const HA_CACHED_RE = new RegExp(
   "/static/(icons/(favicon|mask-icon|apple-touch-icon|maskable_icon|tile-win|logo_ohf|ohf)" +
   "|images/(home-assistant-logo|notification-badge|ohf-badge|open-home-foundation))" +
@@ -634,18 +634,25 @@ async function disableSurvey() {
   } catch(e) {}
 }
 
+// v1.41.0: meteen beginnen. Vroeger wachtte alles op de instellingen van de server
+// (loadConfig) en op het "load" event; op een trage verbinding stonden links en
+// logo's van HA dan even (of bij een gemist load event blijvend) zichtbaar.
 (async () => {
   purgeHaCaches();
-  await loadConfig();
-  applyZoom();
   patchColors();
   patchLaunchScreen();
   patchTitle();
   patchFavicon();
   new MutationObserver(schedulePatch)
     .observe(document.documentElement, { childList: true, subtree: true, characterData: true });
-  window.addEventListener("load", () => {
-    patchAll();
-    setInterval(patchAll, 2000);
-  });
+  const start = () => { patchAll(); setInterval(patchAll, 2000); };
+  if (document.readyState === "complete") start();
+  else window.addEventListener("load", start, { once: true });
+  schedulePatch();
+  const vorigeTekst = BT.loginText;
+  await loadConfig();   // teksten, zoom en klantenlogo: daarna opnieuw toepassen
+  // De aanmeldtekst kan al met de standaardtekst vervangen zijn: die nu bijwerken
+  if (BT.loginText !== vorigeTekst && location.pathname.startsWith("/auth/")) deepReplaceText(document.body, vorigeTekst, BT.loginText);
+  applyZoom();
+  patchAll();
 })();

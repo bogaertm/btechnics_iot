@@ -91,6 +91,12 @@ const ico = fs.readFileSync(path.join(COMP, "favicon.ico"));
 const vIco = authIcons.find((u) => u.startsWith("/btechnics_branding/favicon.ico?v="));
 const vPng = authIcons.find((u) => u.startsWith("/btechnics_branding/app-icon-192.png?v="));
 ok("Iconen: nieuwe adressen geven het Btechnics icoon", !!vIco && !!vPng && (await bytes(vIco)).equals(ico) && (await bytes(vPng)).equals(icon), `${vIco} ${vPng}`);
+// v1.41.0: links van het aanmeldscherm al op de server naar Btechnics
+{
+  const bundel = (auth.match(/\/frontend_latest\/authorize\.[0-9a-f]+\.js/) || [])[0];
+  const js = bundel ? await text(bundel) : "";
+  ok("Aanmeldscherm: geen home-assistant.io links in de code", !!bundel && js.length > 10000 && !/home-assistant\.io\/(docs\/authentication|docs\/locked_out|android|iOS)/.test(js) && js.includes("https://btechnics.be/"), bundel);
+}
 const logo = fs.readFileSync(path.join(COMP, "logo.svg"));
 ok("Static HA logo vervangen", (await bytes("/static/images/home-assistant-logo-loading.svg")).equals(logo));
 
@@ -272,6 +278,21 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   });
   ok("App: twee knoppen met de vaste links", !!knoppen && knoppen.length === 2 && knoppen.some((k) => k.text === "Download voor Mac" && k.href === MAC && k.target === "_blank") && knoppen.some((k) => k.text === "Download voor Windows" && k.href === WIN && k.target === "_blank"), JSON.stringify(knoppen));
   await page.screenshot({ path: (process.env.SHOT || "/tmp/bt.png").replace(/\.png$/, "_app.png") });
+}
+
+// ---------------------------------------------------------------- aanmeldscherm zonder ons script (v1.41.0)
+// Ook als btechnics-branding.js niet laadt (traag, geblokkeerd): Help wijst naar Btechnics.
+{
+  const c = await browser.newContext({ locale: "nl-BE" });
+  await c.route("**/btechnics_branding/btechnics-branding.js", (r) => r.abort());
+  const lp = await c.newPage();
+  await lp.goto(BASE + "/auth/authorize?response_type=code&client_id=" + encodeURIComponent(CLIENT_ID) + "&redirect_uri=" + encodeURIComponent(CLIENT_ID));
+  await sleep(6000);
+  const links = await lp.evaluate(() => { const out = []; const walk = (r) => { r.querySelectorAll("[href]").forEach((a) => out.push(a.getAttribute("href"))); r.querySelectorAll("*").forEach((e) => e.shadowRoot && walk(e.shadowRoot)); }; walk(document); return out.filter((h) => /^https?:/.test(h)); });
+  ok("Aanmeldscherm zonder script: geen links naar home-assistant.io", links.length > 0 && !links.some((h) => /home-assistant\.io|openhomefoundation|nabucasa/.test(h)), JSON.stringify(links));
+  const imgs = await lp.evaluate(() => [...document.querySelectorAll("img")].map((i) => i.getAttribute("src")));
+  ok("Aanmeldscherm zonder script: Btechnics icoon", imgs.some((u) => /btechnics_branding\/app-icon-192\.png/.test(u)), JSON.stringify(imgs));
+  await c.close();
 }
 
 // ---------------------------------------------------------------- woordkeuze (v1.34.0)
@@ -496,7 +517,7 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   // v1.33.1: https verplicht (behalve lokaal adres)
   const fout = await setOpts({ ...ALLES, status_url: "http://work.btechnics.be/api/iot/status", status_token: "testsleutel" });
   ok("Status: http naar buiten geweigerd", fout.f.type === "form" && fout.f.errors && fout.f.errors.status_url === "status_url_https", JSON.stringify(fout.f.errors));
-  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.40.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
+  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.41.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
   ok("Status: geen sleutel in het bericht", !JSON.stringify(b).includes("testsleutel"));
   {
     const fl = await (await fetch(BASE + "/api/config/config_entries/options/flow", { method: "POST", headers: H, body: JSON.stringify({ handler: entry.entry_id }) })).json();
