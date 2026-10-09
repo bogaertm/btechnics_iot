@@ -683,7 +683,7 @@ def _health(hass) -> dict:
 # combinatie van HA en Btechnics IOT meldt dat alles werkt, is die versie
 # bevestigd. Latere probleemmeldingen van een enkel scherm op een bevestigde
 # versie worden genegeerd (enkel gelogd). Na een update begint het opnieuw.
-_BT_VERSION = "1.41.0"
+_BT_VERSION = "1.42.0"
 _HEALTH_STORE = f"{DOMAIN}.health"
 
 

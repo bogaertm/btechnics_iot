@@ -216,6 +216,19 @@ for (const p of ["/config/dashboard", "/config/info", "/config/integrations/dash
   ok(`UI ${p}: geen HA logo`, a.icons === 0, String(a.icons));
   if (p === "/config/dashboard") ok("UI: cloud verborgen", a.cloud === 0);
 }
+// v1.42.0: Labs zonder OHF-apparaatdatabank, Nabu Casa cloud en HA-feedbacklinks
+{
+  await page.goto(BASE + "/config/labs"); await sleep(7000);
+  const labs = await page.evaluate(() => {
+    const out = { kaarten: [], links: [] };
+    const vis = (e) => { const b = e.getBoundingClientRect(); return b.width > 0 && b.height > 0; };
+    const walk = (r) => { r.querySelectorAll("ha-card[data-feature-id]").forEach((c) => vis(c) && out.kaarten.push(c.getAttribute("data-feature-id")));
+      r.querySelectorAll("[href]").forEach((a) => { const h = a.getAttribute("href") || ""; if (vis(a) && /forms\.gle|github\.com\/(home-assistant|OHF-)|openhomefoundation|nabucasa|home-assistant\.io/.test(h)) out.links.push(h); });
+      r.querySelectorAll("*").forEach((e) => e.shadowRoot && walk(e.shadowRoot)); };
+    walk(document); return out; });
+  ok("Labs: geen OHF- of cloudfuncties", !labs.kaarten.some((k) => /^(analytics|cloud)\./.test(k)), JSON.stringify(labs.kaarten));
+  ok("Labs: geen feedback- of HA-links", labs.links.length === 0, JSON.stringify(labs.links));
+}
 ok("UI: geen JS fouten van Btechnics", errors.length === 0, errors.slice(0, 2).join(" | "));
 
 // v1.37.0: een verborgen scherm (kiosk, achtergrondtab) meldt niets
@@ -517,7 +530,7 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   // v1.33.1: https verplicht (behalve lokaal adres)
   const fout = await setOpts({ ...ALLES, status_url: "http://work.btechnics.be/api/iot/status", status_token: "testsleutel" });
   ok("Status: http naar buiten geweigerd", fout.f.type === "form" && fout.f.errors && fout.f.errors.status_url === "status_url_https", JSON.stringify(fout.f.errors));
-  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.41.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
+  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.42.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
   ok("Status: geen sleutel in het bericht", !JSON.stringify(b).includes("testsleutel"));
   {
     const fl = await (await fetch(BASE + "/api/config/config_entries/options/flow", { method: "POST", headers: H, body: JSON.stringify({ handler: entry.entry_id }) })).json();

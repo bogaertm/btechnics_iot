@@ -347,8 +347,10 @@ function patchInlineLogos() {
 }
 
 // Externe HA / Open Home Foundation verwijzingen
-const EXT_HIDE_RE  = /nabucasa\.com|ohf\.to|openhomefoundation\.org|community\.home-assistant\.io|release-notes|\/blog\//;
-const EXT_HA_RE    = /home-assistant\.io|openhomefoundation\.org|ohf\.to|nabucasa\.com/;
+// v1.42.0: ook feedbackformulieren (forms.gle) en GitHub van HA en de Open Home
+// Foundation (Labs: "Geef feedback", "Probleem melden") verbergen.
+const EXT_HIDE_RE  = /nabucasa\.com|ohf\.to|openhomefoundation\.org|community\.home-assistant\.io|release-notes|\/blog\/|forms\.gle|github\.com\/(home-assistant|OHF-)/i;
+const EXT_HA_RE    = /home-assistant\.io|openhomefoundation\.org|ohf\.to|nabucasa\.com|forms\.gle|github\.com\/(home-assistant|OHF-)/i;
 const BT_SITE      = "https://btechnics.be";
 
 function patchExternalLinks() {
@@ -512,6 +514,15 @@ healthTimer = setInterval(reportHealth, 5000);
 // Door de naamvervanging stond er "Btechnics IOT Cloud is een abonnementsdienst met
 // een gratis proefperiode", alsof het een dienst van Btechnics is. Het menu-item in
 // Instellingen, de promokaart bij Spraakassistenten en de cloud pagina's gaan weg.
+// v1.42.0: Labs. De proeffuncties van de Open Home Foundation (apparaatdatabank:
+// gegevens delen met de OHF) en van Home Assistant Cloud (Nabu Casa) stonden er als
+// "Btechnics IOT Cloud", met weggevallen links en dus halve zinnen. Weg ermee; de
+// gewone proeffuncties (bv. wintermodus) blijven.
+function patchLabs() {
+  deepQuery(document, 'ha-card[data-feature-id^="analytics."], ha-card[data-feature-id^="cloud."]')
+    .forEach(c => { if (c.style.display !== "none") c.style.display = "none"; });
+}
+
 function patchCloud() {
   deepQuery(document, 'a[href="/config/cloud"], a[href^="/config/cloud/"]').forEach(a => {
     const host = a.getRootNode()?.host;
@@ -559,6 +570,7 @@ function patchSidebarAppItem() {
 function patchAllInner() {
   disableSurvey();
   patchCloud();
+  patchLabs();
   patchLaunchScreen();
   patchLoginPage();
   patchSidebar();
@@ -578,7 +590,7 @@ function patchAllInner() {
 // Wat voor onze vervanging in die cache belandde, bleef het HA huisje tonen,
 // ook al geeft de server nu het Btechnics logo. Eenmaal per versie halen we die
 // items uit alle caches; de service worker haalt ze dan opnieuw bij de server.
-const BT_VERSION = "1.41.0";
+const BT_VERSION = "1.42.0";
 const HA_CACHED_RE = new RegExp(
   "/static/(icons/(favicon|mask-icon|apple-touch-icon|maskable_icon|tile-win|logo_ohf|ohf)" +
   "|images/(home-assistant-logo|notification-badge|ohf-badge|open-home-foundation))" +
