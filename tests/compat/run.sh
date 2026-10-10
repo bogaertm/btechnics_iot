@@ -7,11 +7,12 @@ ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 WORK="$(mktemp -d)"
 mkdir -p "$WORK/config/custom_components"
 cp -r "$ROOT/custom_components/btechnics_branding" "$WORK/config/custom_components/"
-cp -r "$ROOT/tests/compat/fake_update/bt_fake" "$WORK/config/custom_components/"
+cp -r "$ROOT/tests/compat/fake_update/bt_fake" "$ROOT/tests/compat/fake_update/hacs" "$WORK/config/custom_components/"
 cat > "$WORK/config/configuration.yaml" <<'YAML'
 default_config:
 update:
   - platform: bt_fake
+  - platform: hacs
 logger:
   default: warning
 YAML

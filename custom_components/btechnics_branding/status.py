@@ -280,6 +280,8 @@ async def async_build(hass: HomeAssistant, options: dict, reason: str) -> dict[s
             "categories": list(options.get(auto_update.CONF_CATEGORIES, auto_update.DEFAULT_CATEGORIES)),
             "backup": bool(options.get(auto_update.CONF_BACKUP, True)),
             "last_run": _deep(last),
+            # v1.43.0: herstart na een HACS update op afstand, uitgesteld tot de nacht
+            "restart_planned": auto_update.deferred_restart(hass),
         },
         "updates": {
             "pending": pending,

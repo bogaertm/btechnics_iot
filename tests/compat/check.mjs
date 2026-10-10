@@ -530,7 +530,7 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   // v1.33.1: https verplicht (behalve lokaal adres)
   const fout = await setOpts({ ...ALLES, status_url: "http://work.btechnics.be/api/iot/status", status_token: "testsleutel" });
   ok("Status: http naar buiten geweigerd", fout.f.type === "form" && fout.f.errors && fout.f.errors.status_url === "status_url_https", JSON.stringify(fout.f.errors));
-  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.42.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
+  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.43.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
   ok("Status: geen sleutel in het bericht", !JSON.stringify(b).includes("testsleutel"));
   {
     const fl = await (await fetch(BASE + "/api/config/config_entries/options/flow", { method: "POST", headers: H, body: JSON.stringify({ handler: entry.entry_id }) })).json();
@@ -563,6 +563,29 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   await sleep(12000);
   const naOpAfstand = ontvangen.filter((x) => /op_afstand/.test(x.body.reason || ""));
   ok("Op afstand: status meteen bijgewerkt", naOpAfstand.length > 0 && naOpAfstand[naOpAfstand.length - 1].body.auto_update.time === "05:30:00", JSON.stringify(naOpAfstand.map((x) => x.body.reason)));
+
+  // v1.43.0: herstart na een HACS update op afstand wacht overdag tot de nacht
+  {
+    const utcH = new Date().getUTCHours();
+    const n = 12 - utcH; // tijdzone waarin het nu 12 uur is
+    const tz = n === 0 ? "Etc/GMT" : `Etc/GMT${n > 0 ? "-" : "+"}${Math.abs(n)}`;
+    await ws({ type: "config/core/update", time_zone: tz });
+    await sleep(1000);
+    await fetch(BASE + "/api/services/hacs/test_nieuwe_versie", { method: "POST", headers: H, body: "{}" });
+    await sleep(1500);
+    wachtrij.push({ id: "h1", type: "install_update", entity_id: "update.test_hacs_integratie" });
+    for (let i = 0; i < 20 && !resultaten.some((x) => x.id === "h1"); i++) await sleep(3000);
+    const h1 = resultaten.find((x) => x.id === "h1");
+    ok("Op afstand: HACS update overdag zonder meteen te herstarten", h1 && h1.ok && h1.result.herstart === false && /T05:45:00/.test(h1.result.herstart_gepland || ""), JSON.stringify(h1));
+    await sleep(15000);
+    let nogOp = false;
+    try { nogOp = (await fetch(BASE + "/api/", { headers: H })).ok; } catch (e) { nogOp = false; }
+    ok("Op afstand: HA draait verder na de HACS update", nogOp, String(nogOp));
+    const sb = (await (await fetch(BASE + "/api/services/btechnics_branding/send_status?return_response", { method: "POST", headers: H, body: "{}" })).json()).service_response.bericht;
+    ok("Status: geplande herstart zichtbaar", /T05:45:00/.test((sb.auto_update || {}).restart_planned || ""), JSON.stringify(sb.auto_update && sb.auto_update.restart_planned));
+    const lg = ((sb.logs || {}).btechnics || []).map((x) => x.message || x).join(" | ");
+    ok("Logboek: herstart uitgesteld vermeld", /herstart uitgesteld tot/.test(lg), lg.slice(-200));
+  }
 
   // v1.35.0: desktop-apps (fase 1 token, fase 2 aanmelding door de app)
   {

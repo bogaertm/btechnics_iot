@@ -7,7 +7,9 @@ op: er hoeft geen poort open en de Work-app kan niets rechtstreeks aanroepen.
 Enkel deze opdrachten bestaan; al de rest wordt geweigerd:
 - set_auto_update   automatische updates aan/uit, uur, categorieen, back-up
 - run_updates       de nachtelijke run nu starten (of dry_run: enkel tonen)
-- install_update    een update installeren (enkel update.* entiteiten)
+- install_update    een update installeren (enkel update.* entiteiten); de herstart
+                    na een HACS update wacht overdag tot de nacht (v1.43.0),
+                    tenzij "now": true
 - skip_update       een update overslaan
 - clear_skipped     overgeslagen update terug tonen
 - retry_failed      telling van mislukte pogingen wissen (volgende nacht opnieuw)
@@ -205,6 +207,8 @@ async def _execute(hass: HomeAssistant, entry, cmd: dict) -> tuple[bool, Any]:
         if _bool(cmd, "backup", True) and features & 8:
             data["backup"] = True
         want_restart = _bool(cmd, "restart", True)
+        # v1.43.0: overdag wacht de herstart tot de nacht, tenzij expliciet "now": true
+        restart_now = _bool(cmd, "now", False)
         latest = st.attributes.get("latest_version")
         lock = auto_update._lock(hass)  # noqa: SLF001
         if lock.locked():
@@ -218,11 +222,17 @@ async def _execute(hass: HomeAssistant, entry, cmd: dict) -> tuple[bool, Any]:
         now = hass.states.get(eid)
         from homeassistant.helpers import entity_registry as er
         is_hacs = auto_update._kind(er.async_get(hass).async_get(eid)) == "hacs"  # noqa: SLF001
+        restart = bool(is_hacs and want_restart)
+        planned = None
+        if restart and not restart_now and not auto_update.is_night():
+            planned = auto_update.async_defer_restart(hass, options, f"HACS update op afstand ({eid})")
+            restart = False
         return True, {"entity_id": eid, "naar": latest,
                       "state": now.state if now else None,
                       "installed": now.attributes.get("installed_version") if now else None,
                       # een HACS integratie wordt pas actief na een herstart
-                      "herstart": bool(is_hacs and want_restart)}
+                      "herstart": restart,
+                      "herstart_gepland": planned}
 
     if kind in ("skip_update", "clear_skipped"):
         eid, _st = _update_entity(hass, cmd)

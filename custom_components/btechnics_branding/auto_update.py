@@ -32,7 +32,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
-from datetime import datetime, time as dtime
+from datetime import datetime, time as dtime, timedelta
 from typing import Any
 
 from homeassistant.const import EVENT_STATE_CHANGED
@@ -40,7 +40,7 @@ from homeassistant.core import Event, HomeAssistant, ServiceCall, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers import issue_registry as ir
 from homeassistant.helpers.dispatcher import async_dispatcher_send
-from homeassistant.helpers.event import async_track_time_change
+from homeassistant.helpers.event import async_track_point_in_time, async_track_time_change
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
@@ -66,6 +66,7 @@ _DATA_TRACKER = "btechnics_branding_update_tracker"
 _DATA_VIS_UNSUB = "btechnics_branding_update_vis_unsub"
 _DATA_LOCK = "btechnics_branding_update_lock"
 _DATA_GETOPTS = "btechnics_branding_update_getopts"
+_DATA_DEFER = "btechnics_branding_restart_deferred"
 MAX_ATTEMPTS = 2
 FAILED_ISSUE_PREFIX = "update_failed_"
 _INSTALL_TIMEOUT = 45 * 60  # een app of Core update mag lang duren
@@ -120,6 +121,65 @@ def _parse_time(value: Any) -> dtime:
         return dtime(parts[0], parts[1] if len(parts) > 1 else 0)
     except (ValueError, IndexError):
         return dtime(4, 0)
+
+
+# v1.43.0: een herstart na een HACS update op afstand viel midden op de dag
+# (defrancq, 10/10 10:40). Elk open scherm verloor dan 1 a 2 minuten de verbinding.
+# Overdag wacht de herstart nu tot het uur van de nachtelijke updates.
+_NIGHT_FROM = 23
+_NIGHT_UNTIL = 6
+
+
+def is_night(now: datetime | None = None) -> bool:
+    hour = (now or dt_util.now()).hour
+    return hour >= _NIGHT_FROM or hour < _NIGHT_UNTIL
+
+
+def _next_restart_time(options: dict) -> datetime:
+    at = _parse_time(options.get(CONF_TIME, DEFAULT_TIME))
+    now = dt_util.now()
+    when = now.replace(hour=at.hour, minute=at.minute, second=0, microsecond=0)
+    if when <= now:
+        when += timedelta(days=1)
+    # Na de nachtelijke run: die herstart zelf als ze iets installeert
+    return when + timedelta(minutes=15)
+
+
+def deferred_restart(hass: HomeAssistant) -> str | None:
+    info = hass.data.get(_DATA_DEFER)
+    return info["at"] if info else None
+
+
+@callback
+def async_defer_restart(hass: HomeAssistant, options: dict, why: str) -> str:
+    """Plan een herstart op het nachtelijke uur. Geeft het tijdstip (ISO) terug."""
+    if (info := hass.data.get(_DATA_DEFER)) is not None:
+        return info["at"]
+    when = _next_restart_time(options)
+
+    async def _go(_now: datetime) -> None:
+        if _lock(hass).locked():
+            # Nachtelijke run loopt nog: straks opnieuw proberen
+            hass.data[_DATA_DEFER]["unsub"] = async_track_point_in_time(
+                hass, _go, dt_util.now() + timedelta(minutes=5))
+            return
+        hass.data.pop(_DATA_DEFER, None)
+        _log(hass, f"uitgestelde herstart nu: {why}")
+        await hass.services.async_call("homeassistant", "restart", {}, blocking=False)
+
+    hass.data[_DATA_DEFER] = {
+        "at": when.isoformat(), "why": why,
+        "unsub": async_track_point_in_time(hass, _go, when),
+    }
+    _log(hass, f"herstart uitgesteld tot {when:%d/%m %H:%M}: {why}")
+    async_dispatcher_send(hass, f"{DOMAIN}_status_changed", "updates")
+    return when.isoformat()
+
+
+@callback
+def async_cancel_deferred(hass: HomeAssistant) -> None:
+    if (info := hass.data.pop(_DATA_DEFER, None)) is not None:
+        info["unsub"]()
 
 
 class Tracker:
@@ -343,8 +403,12 @@ async def _async_run_locked(hass: HomeAssistant, options: dict, trigger: str) ->
 
     # HACS integraties worden pas actief na een herstart. Core/OS herstart al zelf.
     if hacs_done and not any(u["kind"] in ("core", "os") for u in todo):
-        _log(hass, "herstart na HACS updates")
-        await hass.services.async_call("homeassistant", "restart", {}, blocking=False)
+        if trigger == "op afstand" and not is_night():
+            result["herstart_gepland"] = async_defer_restart(hass, options, "HACS updates op afstand")
+        else:
+            async_cancel_deferred(hass)
+            _log(hass, "herstart na HACS updates")
+            await hass.services.async_call("homeassistant", "restart", {}, blocking=False)
     return result
 
 
@@ -485,6 +549,7 @@ def async_schedule(hass: HomeAssistant, options: dict) -> None:
 def async_unschedule(hass: HomeAssistant) -> None:
     if unsub := hass.data.pop(_DATA_UNSUB, None):
         unsub()
+    async_cancel_deferred(hass)
 
 
 def register_services(hass: HomeAssistant, get_options) -> None:
