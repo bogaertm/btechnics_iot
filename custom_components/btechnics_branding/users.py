@@ -2,7 +2,7 @@
 
 Overzicht van de gebruikers gaat mee in de status. Opdrachten (via remote.py):
 - create_user    naam, gebruikersnaam, wachtwoord (of laten maken), beheerder, enkel lokaal
-- update_user    naam, beheerder, actief, enkel lokaal
+- update_user    naam, gebruikersnaam (v1.44.0), beheerder, actief, enkel lokaal
 - set_password   nieuw wachtwoord (of laten maken), eventueel overal afmelden
 - logout_user    alle sessies van de gebruiker beeindigen
 - delete_user    gebruiker verwijderen
@@ -29,7 +29,29 @@ from homeassistant.auth.const import GROUP_ID_ADMIN, GROUP_ID_USER
 from homeassistant.core import HomeAssistant
 
 CONF_REMOTE_USERS = "remote_users"
-_USERNAME_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{2,31}$")
+# v1.44.0: de Work-app gebruikt het mailadres als gebruikersnaam. HA zelf eist
+# enkel dat de naam genormaliseerd is (strip + casefold) en uniek
+# (auth/providers/homeassistant.py, _validate_new_username); tekens of lengte
+# beperkt HA niet. Onze regel blijft bewust smal, zodat het een geldige login is
+# op elk toestel en in elke app.
+_USERNAME_RE = re.compile(r"^[a-z0-9._@+-]{3,64}$")
+USERNAME_RULE = "3 tot 64 tekens: kleine letters a tot z, cijfers 0 tot 9, punt, -, _, @ en +"
+
+
+class CommandError(ValueError):
+    """Weigering met een vaste foutcode en de geldende regel (v1.44.0)."""
+
+    def __init__(self, message: str, code: str, rule: str | None = None) -> None:
+        super().__init__(message)
+        self.code = code
+        self.rule = rule
+
+
+def _check_username(raw: Any) -> str:
+    username = str(raw or "").strip().lower()
+    if not _USERNAME_RE.match(username):
+        raise CommandError("gebruikersnaam: " + USERNAME_RULE, "username_invalid", USERNAME_RULE)
+    return username
 _MIN_PASSWORD = 12
 
 
@@ -113,13 +135,11 @@ async def async_execute(hass: HomeAssistant, kind: str, cmd: dict) -> dict[str, 
 
     if kind == "create_user":
         name = str(cmd.get("name") or "").strip()
-        username = str(cmd.get("username") or "").strip().lower()
         if not name or len(name) > 60:
             raise ValueError("naam ontbreekt of is te lang")
-        if not _USERNAME_RE.match(username):
-            raise ValueError("gebruikersnaam: 3 tot 32 tekens, kleine letters, cijfers, punt, - of _")
-        if any(_username(u) == username for u in await hass.auth.async_get_users()):
-            raise ValueError(f"gebruikersnaam {username} bestaat al")
+        username = _check_username(cmd.get("username"))
+        if any((_username(u) or "").casefold() == username for u in await hass.auth.async_get_users()):
+            raise CommandError(f"gebruikersnaam {username} bestaat al", "username_exists")
         generated = not cmd.get("password")
         if not generated and not isinstance(cmd["password"], str):
             raise ValueError("wachtwoord moet tekst zijn")
@@ -159,6 +179,19 @@ async def async_execute(hass: HomeAssistant, kind: str, cmd: dict) -> dict[str, 
             if not name or len(name) > 60:
                 raise ValueError("naam ontbreekt of is te lang")
             kwargs["name"] = name
+        new_username = None
+        if "username" in cmd:
+            new_username = _check_username(cmd.get("username"))
+            if user.is_owner:
+                raise ValueError("de gebruikersnaam van de eigenaar kan niet vanop afstand gewijzigd worden")
+            current = _username(user)
+            if current is None:
+                raise ValueError("deze gebruiker heeft geen wachtwoord bij Home Assistant")
+            if new_username == current:
+                new_username = None
+            elif any((_username(u) or "").casefold() == new_username
+                     for u in await hass.auth.async_get_users() if u.id != user.id):
+                raise CommandError(f"gebruikersnaam {new_username} bestaat al", "username_exists")
         if "admin" in cmd:
             admin = _bool(cmd, "admin")
             if not admin and user.is_admin and await _admins_left(hass, user) == 0:
@@ -171,9 +204,13 @@ async def async_execute(hass: HomeAssistant, kind: str, cmd: dict) -> dict[str, 
             kwargs["is_active"] = active
         if "local_only" in cmd:
             kwargs["local_only"] = _bool(cmd, "local_only")
-        if not kwargs:
+        if not kwargs and new_username is None:
             raise ValueError("niets om aan te passen")
-        await hass.auth.async_update_user(user, **kwargs)
+        if new_username is not None:
+            cred = next(c for c in user.credentials if c.auth_provider_type == "homeassistant")
+            await provider.async_change_username(cred, new_username)
+        if kwargs:
+            await hass.auth.async_update_user(user, **kwargs)
         return _info(await _get(hass, cmd))
 
     if kind == "set_password":

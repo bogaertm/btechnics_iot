@@ -104,10 +104,14 @@ def enabled(options: dict) -> bool:
             and _status_url_ok(options.get(status.CONF_URL) or status.DEFAULT_URL))
 
 
-async def _post_result(hass: HomeAssistant, options: dict, cmd_id: str, ok: bool, data: Any) -> bool:
+async def _post_result(hass: HomeAssistant, options: dict, cmd_id: str, ok: bool, data: Any,
+                       extra: dict | None = None) -> bool:
     token = (options.get(status.CONF_TOKEN) or "").strip()
     body = {"id": cmd_id, "ok": ok, "at": dt_util.utcnow().isoformat(),
             ("result" if ok else "error"): data}
+    if extra:
+        # v1.44.0: vaste foutcode en de geldende regel, naast de leesbare tekst
+        body.update(extra)
     try:
         async with asyncio.timeout(_TIMEOUT_S):
             async with async_get_clientsession(hass).post(
@@ -330,18 +334,22 @@ async def _run_one(hass: HomeAssistant, entry, cmd: dict) -> tuple | None:
     """
     cmd_id = cmd["id"]
     kind = cmd.get("type")
+    extra: dict | None = None
     try:
         if err := _expired(cmd):
             raise ValueError(err)
         ok, data = await _execute(hass, entry, cmd)
     except TimeoutError:
         ok, data = False, "duurde langer dan 45 minuten"
+    except users.CommandError as err:
+        ok, data = False, str(err)
+        extra = {"code": err.code, **({"regel": err.rule} if err.rule else {})}
     except Exception as err:  # noqa: BLE001
         ok, data = False, str(err) or type(err).__name__
     _LOGGER.info("BT op afstand: %s %s -> %s", str(kind)[:40], cmd_id, "ok" if ok else data)
     auto_update._log(hass, f"op afstand: {str(kind)[:40]} {'gelukt' if ok else 'mislukt: ' + str(data)[:200]}")  # noqa: SLF001
-    sent = await _post_result(hass, dict(entry.options), cmd_id, ok, data)
-    await _save_done(hass, cmd_id, {"state": "done", "ok": ok, "data": _stored(data), "sent": sent,
+    sent = await _post_result(hass, dict(entry.options), cmd_id, ok, data, extra)
+    await _save_done(hass, cmd_id, {"state": "done", "ok": ok, "data": _stored(data), "sent": sent, "extra": extra,
                                     "had_password": isinstance(data, dict) and "password" in data,
                                     "at": dt_util.utcnow().isoformat()})
     if ok and isinstance(data, dict) and data.get("herstart"):
@@ -363,7 +371,7 @@ async def _repost(hass: HomeAssistant, entry, cmd_id: str) -> None:
             if rec.get("had_password") and not rec.get("sent"):
                 # Het gemaakte wachtwoord kwam nooit aan en wordt niet bewaard: opnieuw resetten
                 data["password_verloren"] = True
-        await _post_result(hass, dict(entry.options), cmd_id, bool(rec.get("ok")), data)
+        await _post_result(hass, dict(entry.options), cmd_id, bool(rec.get("ok")), data, rec.get("extra"))
     else:
         await _post_result(hass, dict(entry.options), cmd_id, False,
                            "onderbroken (herstart of stroomonderbreking), resultaat onbekend")

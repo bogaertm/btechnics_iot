@@ -530,7 +530,7 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   // v1.33.1: https verplicht (behalve lokaal adres)
   const fout = await setOpts({ ...ALLES, status_url: "http://work.btechnics.be/api/iot/status", status_token: "testsleutel" });
   ok("Status: http naar buiten geweigerd", fout.f.type === "form" && fout.f.errors && fout.f.errors.status_url === "status_url_https", JSON.stringify(fout.f.errors));
-  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.43.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
+  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.44.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
   ok("Status: geen sleutel in het bericht", !JSON.stringify(b).includes("testsleutel"));
   {
     const fl = await (await fetch(BASE + "/api/config/config_entries/options/flow", { method: "POST", headers: H, body: JSON.stringify({ handler: entry.entry_id }) })).json();
@@ -692,6 +692,35 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   ok("Gebruikers: ongeldige gebruikersnaam geweigerd", U.u9 && !U.u9.ok, JSON.stringify(U.u9));
   U = await batch([{ id: "u10", type: "delete_user", user_id: nieuw.id }]);
   ok("Gebruikers: verwijderen", U.u10 && U.u10.ok && !(await login("klanttest", "EenLangGenoegWachtwoord1")), JSON.stringify(U.u10));
+  // v1.44.0: mailadres als gebruikersnaam (afspraak met de Work-app), 3 tot 64 tekens
+  {
+    const lang = "jelle.cool+" + "a".repeat(41) + "@defrancq.be"; // 64 tekens
+    const teLang = "x" + lang; // 65 tekens
+    U = await batch([
+      { id: "m1", type: "create_user", name: "Facilities", username: "facilities@defrancq.be" },
+      { id: "m2", type: "create_user", name: "Jelle", username: lang },
+      { id: "m3", type: "create_user", name: "Te lang", username: teLang },
+      { id: "m4", type: "create_user", name: "Dubbel", username: "Facilities@Defrancq.be" },
+      { id: "m7", type: "create_user", name: "Spatie", username: "jan peeters@defrancq.be" },
+    ]);
+    const f1 = U.m1 && U.m1.result, f2 = U.m2 && U.m2.result;
+    ok("Gebruikers: mailadres als gebruikersnaam", U.m1 && U.m1.ok && f1.username === "facilities@defrancq.be" && !!f1.password, JSON.stringify(U.m1 && { ...U.m1, result: { ...f1, password: "***" } }));
+    ok("Gebruikers: aanmelden met mailadres", !!f1 && (await login("facilities@defrancq.be", f1.password)));
+    ok("Gebruikers: aanmelden met mailadres in hoofdletters", !!f1 && (await login("Facilities@Defrancq.be", f1.password)));
+    ok("Gebruikers: 64 tekens met + en punt", lang.length === 64 && U.m2 && U.m2.ok && f2.username === lang && (await login(lang, f2.password)), JSON.stringify(U.m2 && { ok: U.m2.ok, error: U.m2.error, len: lang.length }));
+    ok("Gebruikers: 65 tekens geweigerd met code en regel", U.m3 && !U.m3.ok && U.m3.code === "username_invalid" && /64/.test(U.m3.regel || "") && /@/.test(U.m3.regel || ""), JSON.stringify(U.m3));
+    ok("Gebruikers: spatie geweigerd met code", U.m7 && !U.m7.ok && U.m7.code === "username_invalid", JSON.stringify(U.m7));
+    ok("Gebruikers: zelfde mailadres in hoofdletters is dubbel", U.m4 && !U.m4.ok && U.m4.code === "username_exists", JSON.stringify(U.m4));
+    U = await batch([
+      { id: "m5", type: "update_user", user_id: f1.id, username: "facilitair@defrancq.be" },
+      { id: "m6", type: "update_user", user_id: f1.id, username: "geen geldig@adres" },
+      { id: "m8", type: "update_user", user_id: f1.id, username: lang },
+    ]);
+    ok("Gebruikers: gebruikersnaam wijzigen naar ander mailadres", U.m5 && U.m5.ok && U.m5.result.username === "facilitair@defrancq.be" && (await login("facilitair@defrancq.be", f1.password)) && !(await login("facilities@defrancq.be", f1.password)), JSON.stringify(U.m5));
+    ok("Gebruikers: ongeldige nieuwe gebruikersnaam met code", U.m6 && !U.m6.ok && U.m6.code === "username_invalid" && !!U.m6.regel, JSON.stringify(U.m6));
+    ok("Gebruikers: nieuwe gebruikersnaam die al bestaat met code", U.m8 && !U.m8.ok && U.m8.code === "username_exists", JSON.stringify(U.m8));
+    await batch([{ id: "m9", type: "delete_user", user_id: f1.id }, { id: "m10", type: "delete_user", user_id: f2.id }]);
+  }
   const sm = (await (await fetch(BASE + "/api/services/btechnics_branding/send_status?return_response", { method: "POST", headers: H, body: "{}" })).json()).service_response.bericht;
   ok("Gebruikers: klant ziet een melding in HA", (sm.logs.notifications || []).some((n) => /gebruikersbeheer/i.test(n.title)), (sm.logs.notifications || []).map((n) => n.title).join(","));
   const hlog = await (await fetch(BASE + "/api/error_log", { headers: H })).text().catch(() => "");
