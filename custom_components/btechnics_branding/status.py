@@ -31,6 +31,8 @@ from homeassistant.helpers.dispatcher import async_dispatcher_connect
 from homeassistant.helpers.event import async_call_later, async_track_time_interval
 from homeassistant.util import dt as dt_util
 
+_SOFT_ORDER = {"core": 0, "os": 1, "supervisor": 2, "addon": 3, "hacs": 4, "custom": 5, "firmware": 6}
+
 _LOGGER = logging.getLogger(__name__)
 
 DOMAIN = "btechnics_branding"
@@ -230,6 +232,36 @@ async def async_build(hass: HomeAssistant, options: dict, reason: str) -> dict[s
             "failed": attempts >= auto_update.MAX_ATTEMPTS,
         })
 
+    # v1.45.0: volledige softwarelijst (ook wat up-to-date is): HA zelf, OS,
+    # Supervisor, apps (add-ons), HACS en firmware, via hun update-entiteit.
+    software: list[dict] = []
+    for st in hass.states.async_all("update"):
+        entry = reg.async_get(st.entity_id)
+        software.append({
+            "entity_id": st.entity_id,
+            "name": _safe(st.attributes.get("title") or st.attributes.get("friendly_name") or st.entity_id),
+            "kind": auto_update._kind(entry),  # noqa: SLF001
+            "installed": _safe(st.attributes.get("installed_version")),
+            "latest": _safe(st.attributes.get("latest_version")),
+            "up_to_date": st.state == "off",
+            "available": st.state not in ("unavailable", "unknown"),
+        })
+    # Eigen integraties (custom_components) met de versie uit hun manifest. Wie via
+    # HACS komt, staat ook hierboven als "hacs"; hier gaat het om de code die draait.
+    try:
+        from homeassistant.loader import async_get_custom_components
+        customs = await async_get_custom_components(hass)
+        for domain, integ in sorted(customs.items()):
+            name = _safe(integ.name)
+            software.append({
+                "entity_id": None, "name": name, "kind": "custom", "domain": domain,
+                "installed": _safe(str(integ.version) if integ.version else None),
+                "latest": None, "up_to_date": None, "available": True,
+            })
+    except Exception:  # noqa: BLE001
+        pass
+    software.sort(key=lambda x: (_SOFT_ORDER.get(x["kind"], 9), str(x["name"]).lower()))
+
     skipped_list = [
         {"entity_id": s.entity_id,
          "name": _safe(s.attributes.get("title") or s.attributes.get("friendly_name") or s.entity_id),
@@ -283,6 +315,7 @@ async def async_build(hass: HomeAssistant, options: dict, reason: str) -> dict[s
             # v1.43.0: herstart na een HACS update op afstand, uitgesteld tot de nacht
             "restart_planned": auto_update.deferred_restart(hass),
         },
+        "software": software,
         "updates": {
             "pending": pending,
             "failed": [p for p in pending if p["failed"]],
