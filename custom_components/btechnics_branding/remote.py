@@ -47,7 +47,7 @@ from homeassistant.helpers.event import async_track_time_interval
 from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
-from . import auto_update, status, users
+from . import auto_update, status, toegang, users
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -283,6 +283,10 @@ async def _execute(hass: HomeAssistant, entry, cmd: dict) -> tuple[bool, Any]:
         _notify_users(hass, kind, data, cmd["id"])
         return True, data
 
+    if kind == toegang.KIND:
+        # v1.46.0: deurtoegang via btechnics_toegang
+        return True, await toegang.async_execute(hass, options, cmd)
+
     raise ValueError(f"onbekende opdracht: {str(kind)[:40]}")
 
 
@@ -301,9 +305,10 @@ def _expired(cmd: dict) -> str | None:
 
 
 def _stored(data: Any) -> Any:
-    """Resultaat om te bewaren: nooit een wachtwoord, kort gehouden."""
+    """Resultaat om te bewaren: nooit een wachtwoord, url of code, kort gehouden."""
     if isinstance(data, dict):
         data = {k: v for k, v in data.items() if k != "password"}
+    data = toegang.strip_secrets(data)
     text = json.dumps(data, default=str)
     return data if len(text) <= 2000 else text[:2000]
 
@@ -350,7 +355,7 @@ async def _run_one(hass: HomeAssistant, entry, cmd: dict) -> tuple | None:
     auto_update._log(hass, f"op afstand: {str(kind)[:40]} {'gelukt' if ok else 'mislukt: ' + str(data)[:200]}")  # noqa: SLF001
     sent = await _post_result(hass, dict(entry.options), cmd_id, ok, data, extra)
     await _save_done(hass, cmd_id, {"state": "done", "ok": ok, "data": _stored(data), "sent": sent, "extra": extra,
-                                    "had_password": isinstance(data, dict) and "password" in data,
+                                    "had_password": (isinstance(data, dict) and "password" in data) or toegang.has_secret(data),
                                     "at": dt_util.utcnow().isoformat()})
     if ok and isinstance(data, dict) and data.get("herstart"):
         domain, service = _RESTARTS.get(kind, _RESTARTS["restart"])

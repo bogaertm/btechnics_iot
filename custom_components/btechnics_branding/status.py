@@ -277,6 +277,8 @@ async def async_build(hass: HomeAssistant, options: dict, reason: str) -> dict[s
                          for u in await users.async_list(hass)]
         except Exception:  # noqa: BLE001
             user_list = None
+    from . import toegang
+    toegang_blok = await toegang.async_status(hass, options)
     from . import desktop
     try:
         desktop_apps = [{**a, "naam": _safe(a.get("naam"))} for a in await desktop.async_list(hass)]
@@ -284,6 +286,8 @@ async def async_build(hass: HomeAssistant, options: dict, reason: str) -> dict[s
         desktop_apps = None
     return {
         "desktop_apps": desktop_apps,
+        # v1.46.0: deurtoegang (btechnics_toegang), enkel als de optie aan staat
+        **({"toegang": toegang_blok} if toegang_blok is not None else {}),
         "logs": _logs(hass),
         "users": user_list,
         "schema": SCHEMA_VERSION,
@@ -304,6 +308,7 @@ async def async_build(hass: HomeAssistant, options: dict, reason: str) -> dict[s
         "remote": {
             "enabled": bool(options.get("remote_control", True)),
             "users": bool(options.get("remote_users", False)),
+            "toegang": bool(options.get("remote_toegang", False)),
             "last_poll": _deep((hass.data.get("btechnics_branding_remote") or {}).get("last")),
         },
         "auto_update": {

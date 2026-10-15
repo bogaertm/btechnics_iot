@@ -188,6 +188,8 @@ class BtechnicsBrandingOptionsFlow(config_entries.OptionsFlow):
         schema[vol.Optional("remote_control", default=current.get("remote_control", True))] = bool
         # v1.35.0: gebruikers beheren vanop afstand (users.py)
         schema[vol.Optional("remote_users", default=current.get("remote_users", False))] = bool
+        # v1.46.0: deurtoegang beheren vanuit Btechnics Work (toegang.py)
+        schema[vol.Optional("remote_toegang", default=current.get("remote_toegang", False))] = bool
 
         return self.async_show_form(
             step_id="init",

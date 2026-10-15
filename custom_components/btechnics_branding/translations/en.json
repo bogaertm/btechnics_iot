@@ -34,6 +34,7 @@
           "status_token": "Key of this customer (leave empty = unchanged)",
           "remote_control": "Remote management by Btechnics (manage updates)",
           "remote_users": "Remote user management by Btechnics",
+          "remote_toegang": "Manage door access from Btechnics Work",
           "status_token_remove": "Remove key (stop status and remote management)"
         },
         "description": "Current customer logo: {customer_logo_status}\n\nStatus to Btechnics: fill in the key of this customer. Without a key nothing is sent."

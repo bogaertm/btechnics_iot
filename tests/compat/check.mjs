@@ -530,13 +530,13 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   // v1.33.1: https verplicht (behalve lokaal adres)
   const fout = await setOpts({ ...ALLES, status_url: "http://work.btechnics.be/api/iot/status", status_token: "testsleutel" });
   ok("Status: http naar buiten geweigerd", fout.f.type === "form" && fout.f.errors && fout.f.errors.status_url === "status_url_https", JSON.stringify(fout.f.errors));
-  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.45.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
+  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.46.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
   {
     const sw = b.software || [];
     const own = sw.find((x) => x.kind === "custom" && x.domain === "btechnics_branding");
     const hacs = sw.find((x) => x.entity_id === "update.test_hacs_integratie");
     const fw = sw.find((x) => x.entity_id === "update.test_faalt");
-    ok("Status: softwarelijst met alle versies (v1.45.0)", !!own && own.installed === "1.45.0" && !!hacs && hacs.kind === "hacs" && hacs.installed === "v1.0.0" && hacs.up_to_date === true && !!fw && fw.up_to_date === false && fw.latest === "2.0.0", JSON.stringify(sw.map((x) => `${x.kind}:${x.name}=${x.installed}${x.up_to_date === false ? "->" + x.latest : ""}`)));
+    ok("Status: softwarelijst met alle versies (v1.45.0)", !!own && own.installed === "1.46.0" && !!hacs && hacs.kind === "hacs" && hacs.installed === "v1.0.0" && hacs.up_to_date === true && !!fw && fw.up_to_date === false && fw.latest === "2.0.0", JSON.stringify(sw.map((x) => `${x.kind}:${x.name}=${x.installed}${x.up_to_date === false ? "->" + x.latest : ""}`)));
   }
   ok("Status: geen sleutel in het bericht", !JSON.stringify(b).includes("testsleutel"));
   {
@@ -732,6 +732,32 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   ok("Gebruikers: klant ziet een melding in HA", (sm.logs.notifications || []).some((n) => /gebruikersbeheer/i.test(n.title)), (sm.logs.notifications || []).map((n) => n.title).join(","));
   const hlog = await (await fetch(BASE + "/api/error_log", { headers: H })).text().catch(() => "");
   ok("Gebruikers: wachtwoord nergens in het HA log", !hlog.includes("EenLangGenoegWachtwoord1") && !(nieuw && hlog.includes(nieuw.password)), "");
+
+  // v1.46.0: deurtoegang vanuit Btechnics Work (btechnics_toegang.werk)
+  {
+    let T = await batch([{ id: "t0", type: "toegang", actie: "overzicht", velden: {} }]);
+    ok("Toegang: standaard uit", T.t0 && !T.t0.ok && /deurtoegang op afstand staat uit/.test(T.t0.error), JSON.stringify(T.t0));
+    let sb0 = (await (await fetch(BASE + "/api/services/btechnics_branding/send_status?return_response", { method: "POST", headers: H, body: "{}" })).json()).service_response.bericht;
+    ok("Toegang: uit = geen blok en remote.toegang false", sb0.remote && sb0.remote.toegang === false && !("toegang" in sb0), JSON.stringify(sb0.remote));
+    await setOpts({ ...ALLES, status_url: `http://${GW}:8999/status`, remote_users: true, remote_toegang: true }); await sleep(1000);
+    T = await batch([
+      { id: "t1", type: "toegang", actie: "overzicht", velden: {}, door: "Matthias" },
+      { id: "t2", type: "toegang", actie: "uitnodigen", velden: { persoon: "p1" }, door: "Matthias" },
+      { id: "t3", type: "toegang", actie: "tijdelijke_code", velden: { deur: "voordeur" } },
+      { id: "t4", type: "toegang", actie: "deur_weg", velden: {} },
+      { id: "t5", type: "toegang", velden: {} },
+    ]);
+    ok("Toegang: toegelaten actie geeft het antwoord terug", T.t1 && T.t1.ok && T.t1.result.schema === 1 && T.t1.result.deuren[0].id === "voordeur", JSON.stringify(T.t1));
+    ok("Toegang: uitnodigen stuurt de url een keer naar Work", T.t2 && T.t2.ok && /geheim-uitnodiging/.test(T.t2.result.url || ""), JSON.stringify(T.t2 && { ...T.t2, result: { ...T.t2.result, url: T.t2.result.url ? "***" : null } }));
+    ok("Toegang: tijdelijke code naar Work", T.t3 && T.t3.ok && T.t3.result.code === "918273", JSON.stringify(T.t3 && T.t3.ok));
+    ok("Toegang: fout van Toegang wordt code toegang met regel", T.t4 && !T.t4.ok && T.t4.code === "toegang" && /onbekende deur/.test(T.t4.regel || "") && /onbekende deur/.test(T.t4.error), JSON.stringify(T.t4));
+    ok("Toegang: actie ontbreekt geweigerd", T.t5 && !T.t5.ok && /actie/.test(T.t5.error), JSON.stringify(T.t5));
+    await sleep(1500);
+    const store = fs.readFileSync(path.join(process.env.BT_CONFIG_DIR, ".storage", "btechnics_branding.remote"), "utf8");
+    ok("Toegang: url en code staan niet in de Store", store.includes('"t2"') && store.includes('"t3"') && !store.includes("geheim-uitnodiging") && !store.includes("918273"), store.length + " tekens");
+    const sb = (await (await fetch(BASE + "/api/services/btechnics_branding/send_status?return_response", { method: "POST", headers: H, body: "{}" })).json()).service_response.bericht;
+    ok("Toegang: statusblok met overzicht en remote.toegang", sb.remote && sb.remote.toegang === true && sb.toegang && sb.toegang.schema === 1 && sb.toegang.deuren.length === 1, JSON.stringify({ remote: sb.remote && sb.remote.toegang, toegang: sb.toegang }));
+  }
 
   // v1.39.0: desktop-app die tijdens de opstart van HA verbindt (voor deze integratie
   // geladen is) en daarna verbonden blijft, zoals de app na een HACS-update doet.

@@ -1,0 +1,9 @@
+{
+  "domain": "btechnics_toegang",
+  "name": "Btechnics Toegang (test)",
+  "version": "0.6.0",
+  "documentation": "https://btechnics.be",
+  "codeowners": [],
+  "requirements": [],
+  "iot_class": "local_push"
+}
