@@ -311,6 +311,52 @@ def _log(hass: HomeAssistant, message: str) -> None:
         pass
 
 
+# v1.47.0: HACS kijkt eigen (custom) repositories, zoals btechnics_iot,
+# btechnics_toegang en btechnics_vto, maar elke 48 uur na: een interval dat
+# bij elke herstart opnieuw begint (hacs/base.py, async_update_downloaded_custom_repositories,
+# timedelta(hours=48)). Een installatie die vaker herstart, zag nieuwe versies
+# nooit (iot.bogaert.me bleef op 1.40.0 staan). Daarom vragen we HACS zelf om
+# die repositories te verversen, net zoals de knop "Opnieuw laden" in HACS
+# (websocket hacs/repository/refresh).
+_HACS_REFRESH_TIMEOUT = 60
+
+
+async def async_refresh_hacs_custom(hass: HomeAssistant) -> dict:
+    """Ververs de gedownloade custom repositories in HACS. Faalt nooit."""
+    out: dict[str, Any] = {"ververst": [], "fouten": []}
+    hacs = hass.data.get("hacs")
+    repos_obj = getattr(hacs, "repositories", None) if hacs is not None else None
+    if repos_obj is None:
+        return out
+    try:
+        repos = [r for r in repos_obj.list_downloaded
+                 if not repos_obj.is_default(str(r.data.id))]
+    except Exception as err:  # noqa: BLE001
+        out["fouten"].append(f"lijst: {err}")
+        return out
+    for repo in repos:
+        name = getattr(getattr(repo, "data", None), "full_name", "?")
+        try:
+            async with asyncio.timeout(_HACS_REFRESH_TIMEOUT):
+                await repo.update_repository(ignore_issues=True, force=True)
+            out["ververst"].append(name)
+        except Exception as err:  # noqa: BLE001
+            out["fouten"].append(f"{name}: {err or type(err).__name__}")
+    try:
+        await hacs.data.async_write()
+    except Exception:  # noqa: BLE001
+        pass
+    for coordinator in (getattr(hacs, "coordinators", None) or {}).values():
+        try:
+            coordinator.async_update_listeners()
+        except Exception:  # noqa: BLE001
+            pass
+    await asyncio.sleep(1)  # update-entiteiten hun nieuwe toestand laten schrijven
+    if out["ververst"] or out["fouten"]:
+        _LOGGER.info("BT auto-update: HACS custom repositories ververst: %s", out)
+    return out
+
+
 def _lock(hass: HomeAssistant) -> asyncio.Lock:
     """v1.33.1: een run tegelijk (nachtelijk en manueel), anders dubbele installaties."""
     return hass.data.setdefault(_DATA_LOCK, asyncio.Lock())
@@ -338,6 +384,9 @@ async def _async_run_locked(hass: HomeAssistant, options: dict, trigger: str) ->
         _log(hass, result["stopped"])
         return result
 
+    refresh = await async_refresh_hacs_custom(hass)
+    if refresh["fouten"]:
+        _log(hass, "HACS verversen deels mislukt: " + "; ".join(refresh["fouten"])[:300])
     todo, skipped = plan(hass, options)
     result["skipped"] = skipped
     if not todo:
@@ -560,6 +609,7 @@ def register_services(hass: HomeAssistant, get_options) -> None:
     async def _run(call: ServiceCall) -> dict:
         options = get_options()
         if call.data.get("dry_run", False):
+            await async_refresh_hacs_custom(hass)
             todo, skipped = plan(hass, options)
             return {
                 "zou_installeren": [f"{u['name']} {u['from']} naar {u['to']}" for u in todo],

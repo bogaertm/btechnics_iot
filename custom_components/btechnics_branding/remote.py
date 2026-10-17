@@ -189,6 +189,8 @@ async def _execute(hass: HomeAssistant, entry, cmd: dict) -> tuple[bool, Any]:
         }
 
     if kind == "run_updates":
+        if _bool(cmd, "dry_run", False):
+            await auto_update.async_refresh_hacs_custom(hass)
         todo, skipped = auto_update.plan(hass, options)
         plan = [f"{u['name']} {u['from']} naar {u['to']}" for u in todo]
         if _bool(cmd, "dry_run", False):

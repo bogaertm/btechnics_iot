@@ -530,13 +530,13 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   // v1.33.1: https verplicht (behalve lokaal adres)
   const fout = await setOpts({ ...ALLES, status_url: "http://work.btechnics.be/api/iot/status", status_token: "testsleutel" });
   ok("Status: http naar buiten geweigerd", fout.f.type === "form" && fout.f.errors && fout.f.errors.status_url === "status_url_https", JSON.stringify(fout.f.errors));
-  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.46.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
+  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.47.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
   {
     const sw = b.software || [];
     const own = sw.find((x) => x.kind === "custom" && x.domain === "btechnics_branding");
     const hacs = sw.find((x) => x.entity_id === "update.test_hacs_integratie");
     const fw = sw.find((x) => x.entity_id === "update.test_faalt");
-    ok("Status: softwarelijst met alle versies (v1.45.0)", !!own && own.installed === "1.46.0" && !!hacs && hacs.kind === "hacs" && hacs.installed === "v1.0.0" && hacs.up_to_date === true && !!fw && fw.up_to_date === false && fw.latest === "2.0.0", JSON.stringify(sw.map((x) => `${x.kind}:${x.name}=${x.installed}${x.up_to_date === false ? "->" + x.latest : ""}`)));
+    ok("Status: softwarelijst met alle versies (v1.45.0)", !!own && own.installed === "1.47.0" && !!hacs && hacs.kind === "hacs" && hacs.installed === "v1.0.0" && hacs.up_to_date === true && !!fw && fw.up_to_date === false && fw.latest === "2.0.0", JSON.stringify(sw.map((x) => `${x.kind}:${x.name}=${x.installed}${x.up_to_date === false ? "->" + x.latest : ""}`)));
   }
   ok("Status: geen sleutel in het bericht", !JSON.stringify(b).includes("testsleutel"));
   {
@@ -570,6 +570,17 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   await sleep(12000);
   const naOpAfstand = ontvangen.filter((x) => /op_afstand/.test(x.body.reason || ""));
   ok("Op afstand: status meteen bijgewerkt", naOpAfstand.length > 0 && naOpAfstand[naOpAfstand.length - 1].body.auto_update.time === "05:30:00", JSON.stringify(naOpAfstand.map((x) => x.body.reason)));
+
+  // v1.47.0: HACS ververst eigen (custom) repositories maar om de 48 uur; wij vragen het zelf
+  {
+    const teller = async () => (await (await fetch(BASE + "/api/services/hacs/test_teller?return_response", { method: "POST", headers: H, body: "{}" })).json()).service_response.refreshes;
+    const voor = await teller();
+    await fetch(BASE + "/api/services/hacs/test_bij_verversen", { method: "POST", headers: H, body: "{}" });
+    const d = (await (await fetch(BASE + "/api/services/btechnics_branding/run_updates?return_response", { method: "POST", headers: H, body: JSON.stringify({ dry_run: true }) })).json()).service_response || {};
+    const na = await teller();
+    ok("HACS: custom repository ververst voor het plan (enkel custom, niet default)", na - voor === 1, `${voor} -> ${na}`);
+    ok("HACS: nieuwe versie na verversen meteen in het plan", (d.zou_installeren || []).some((x) => /Test HACS integratie v1\.0\.0 naar v1\.1\.0/.test(x)), JSON.stringify(d.zou_installeren));
+  }
 
   // v1.43.0: herstart na een HACS update op afstand wacht overdag tot de nacht
   {
