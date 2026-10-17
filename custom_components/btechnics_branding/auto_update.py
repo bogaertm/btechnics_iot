@@ -182,6 +182,21 @@ def async_cancel_deferred(hass: HomeAssistant) -> None:
         info["unsub"]()
 
 
+# v1.48.0: nieuwe versies van HA OS, Supervisor en apps pas installeren als ze
+# minstens 7 dagen bekend zijn. De eerste dagen na een release zitten er vaak
+# nog fouten in; dan komt meestal snel een bugfix. Core blijft wachten op .1.
+HOLD_DAYS = 7
+HOLD_KINDS = ("os", "supervisor", "addon")
+
+
+def hold_until(first_seen: datetime, days: int = HOLD_DAYS) -> datetime:
+    return first_seen + timedelta(days=days)
+
+
+def on_hold(first_seen: datetime, now: datetime, days: int = HOLD_DAYS) -> bool:
+    return now < hold_until(first_seen, days)
+
+
 class Tracker:
     """Pogingen per update en welke entiteiten wij verborgen hebben (blijft bewaard)."""
 
@@ -189,16 +204,34 @@ class Tracker:
         self._store: Store[dict] = Store(hass, 1, f"{DOMAIN}.auto_update")
         self.attempts: dict[str, dict] = {}
         self.hidden: set[str] = set()
+        self.seen: dict[str, dict] = {}
 
     async def async_load(self) -> None:
         data = await self._store.async_load() or {}
         self.attempts = data.get("attempts", {})
         self.hidden = set(data.get("hidden", []))
+        self.seen = data.get("seen", {})
 
     def _save(self) -> None:
         self._store.async_delay_save(
-            lambda: {"attempts": self.attempts, "hidden": sorted(self.hidden)}, 2
+            lambda: {"attempts": self.attempts, "hidden": sorted(self.hidden), "seen": self.seen}, 2
         )
+
+    def first_seen(self, entity_id: str, version: str | None) -> datetime:
+        """Wanneer zagen we deze versie voor het eerst als beschikbaar (v1.48.0)."""
+        rec = self.seen.get(entity_id)
+        if rec and rec.get("version") == version:
+            parsed = dt_util.parse_datetime(str(rec.get("since")))
+            if parsed is not None:
+                return parsed
+        now = dt_util.utcnow()
+        self.seen[entity_id] = {"version": version, "since": now.isoformat()}
+        self._save()
+        return now
+
+    def forget_seen(self, entity_id: str) -> None:
+        if self.seen.pop(entity_id, None) is not None:
+            self._save()
 
     def count(self, entity_id: str, version: str | None) -> int:
         a = self.attempts.get(entity_id)
@@ -265,6 +298,13 @@ def plan(hass: HomeAssistant, options: dict) -> tuple[list[dict], list[str]]:
                 skipped.append(f"{name}: {why}")
                 continue
         tracker = _tracker(hass)
+        if tracker and kind in HOLD_KINDS:
+            since = tracker.first_seen(state.entity_id, latest)
+            if on_hold(since, dt_util.utcnow()):
+                until = dt_util.as_local(hold_until(since))
+                skipped.append(f"{name} {latest}: nieuwe versie, wacht tot {until:%d/%m} "
+                               f"({HOLD_DAYS} dagen voor bugfixes)")
+                continue
         if tracker and tracker.count(state.entity_id, latest) >= MAX_ATTEMPTS:
             skipped.append(f"{name} {latest}: {MAX_ATTEMPTS} keer mislukt, wacht op manuele actie")
             continue
@@ -487,6 +527,10 @@ def async_sync_visibility(hass: HomeAssistant, options: dict, only: str | None =
         pending = state.state == "on"
         if not pending:
             tracker.reset(eid)
+            tracker.forget_seen(eid)
+        elif kind in HOLD_KINDS:
+            # v1.48.0: de wachttijd start zodra de update verschijnt, niet pas 's nachts
+            tracker.first_seen(eid, latest)
         failed = pending and tracker.count(eid, latest) >= MAX_ATTEMPTS
         hide = pending and not failed and _managed(state, kind, options)
 
