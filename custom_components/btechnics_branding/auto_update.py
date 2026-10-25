@@ -32,6 +32,7 @@ from __future__ import annotations
 import asyncio
 import logging
 import re
+import time as _time
 from datetime import datetime, time as dtime, timedelta
 from typing import Any
 
@@ -197,6 +198,42 @@ def on_hold(first_seen: datetime, now: datetime, days: int = HOLD_DAYS) -> bool:
     return now < hold_until(first_seen, days)
 
 
+# v1.48.1: op 25/10 (iot.bogaert.me) mislukte de Core update met "Backup manager
+# busy: create_backup". De automatische back-up van HA zelf liep op dat moment (geen
+# vaste tijd ingesteld: 04:45 plus tot 60 min willekeurig, die nacht door de overgang
+# naar wintertijd een uur vroeger). HA weigert dan een tweede back-up
+# (homeassistant/components/backup/manager.py, async_initiate_backup).
+# Daarom wachten we tot de back-upmanager vrij is, en telt "busy" niet als poging.
+BACKUP_WAIT = 30 * 60
+BACKUP_POLL = 15
+
+
+def backup_state(hass: HomeAssistant) -> str | None:
+    """Status van de HA back-upmanager (idle, create_backup, ...), None als er geen is."""
+    manager = hass.data.get("backup")  # backup.const.DATA_MANAGER
+    state = getattr(manager, "state", None)
+    return None if state is None else str(state)
+
+
+def backup_busy_error(err: BaseException) -> bool:
+    return "backup manager busy" in str(err).lower()
+
+
+async def async_wait_backup_idle(
+    hass: HomeAssistant, timeout: float | None = None, poll: float | None = None
+) -> str | None:
+    """Wacht tot de back-upmanager vrij is. None = vrij, anders de status na de wachttijd."""
+    poll = BACKUP_POLL if poll is None else poll
+    deadline = _time.monotonic() + (BACKUP_WAIT if timeout is None else timeout)
+    while True:
+        state = backup_state(hass)
+        if state in (None, "idle"):
+            return None
+        if _time.monotonic() >= deadline:
+            return state
+        await asyncio.sleep(poll)
+
+
 class Tracker:
     """Pogingen per update en welke entiteiten wij verborgen hebben (blijft bewaard)."""
 
@@ -243,6 +280,15 @@ class Tracker:
                                     "last": dt_util.utcnow().isoformat()}
         self._save()
         return n
+
+    def undo_attempt(self, entity_id: str, version: str | None) -> None:
+        """v1.48.1: een poging die niet aan de update zelf lag, telt niet mee."""
+        n = self.count(entity_id, version)
+        if n <= 1:
+            self.reset(entity_id)
+        else:
+            self.attempts[entity_id]["count"] = n - 1
+            self._save()
 
     def reset(self, entity_id: str) -> None:
         if self.attempts.pop(entity_id, None) is not None:
@@ -441,6 +487,12 @@ async def _async_run_locked(hass: HomeAssistant, options: dict, trigger: str) ->
         if use_backup and upd["backup"]:
             data["backup"] = True
         label = f"{upd['name']} {upd['from']} naar {upd['to']}"
+        if data.get("backup") and backup_state(hass) not in (None, "idle"):
+            _log(hass, f"back-up van HA bezig ({backup_state(hass)}), wachten voor {label}")
+            busy = await async_wait_backup_idle(hass)
+            if busy is not None:
+                skipped.append(f"{label}: back-up van HA nog bezig ({busy}), volgende nacht")
+                continue
         if upd["kind"] in ("core", "os"):
             # Vanaf hier herstart het systeem; eerst loggen wat al gebeurd is.
             _log(hass, "gestart: " + label + (" (met back-up)" if data.get("backup") else ""))
@@ -466,6 +518,13 @@ async def _async_run_locked(hass: HomeAssistant, options: dict, trigger: str) ->
             result["failed"].append(f"{label}: duurde langer dan {_INSTALL_TIMEOUT // 60} minuten")
             _LOGGER.info("BT auto-update: %s duurde te lang", label)
         except Exception as err:  # noqa: BLE001
+            if backup_busy_error(err):
+                # v1.48.1: net tegelijk met een back-up gestart; geen fout van de update
+                if tracker:
+                    tracker.undo_attempt(upd["entity_id"], upd["to"])
+                skipped.append(f"{label}: back-up van HA bezig, volgende nacht")
+                _LOGGER.info("BT auto-update: %s uitgesteld: %s", label, err)
+                continue
             result["failed"].append(f"{label}: {err or type(err).__name__}")
             _LOGGER.info("BT auto-update: %s mislukt: %s", label, err)
         else:

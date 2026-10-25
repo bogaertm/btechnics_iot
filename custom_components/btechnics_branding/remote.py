@@ -219,6 +219,9 @@ async def _execute(hass: HomeAssistant, entry, cmd: dict) -> tuple[bool, Any]:
         lock = auto_update._lock(hass)  # noqa: SLF001
         if lock.locked():
             raise ValueError("er loopt al een run, probeer later opnieuw")
+        if data.get("backup") and (busy := auto_update.backup_state(hass)) not in (None, "idle"):
+            # v1.48.1: HA weigert dan de back-up ("Backup manager busy")
+            raise ValueError(f"HA maakt nu zelf een back-up ({busy}), probeer over enkele minuten opnieuw")
         async with lock:
             async with asyncio.timeout(45 * 60):
                 await hass.services.async_call("update", "install", data, blocking=True)
