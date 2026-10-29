@@ -230,7 +230,8 @@ async def async_build(hass: HomeAssistant, options: dict, reason: str) -> dict[s
             "kind": auto_update._kind(entry),  # noqa: SLF001
             "hidden": bool(entry and entry.hidden_by),
             "attempts": attempts,
-            "failed": attempts >= auto_update.MAX_ATTEMPTS,
+            # v1.48.3: tijdens poging 2 nog niet mislukt
+            "failed": attempts >= auto_update.MAX_ATTEMPTS and not auto_update.is_installing(hass, st.entity_id),
         })
 
     # v1.45.0: volledige softwarelijst (ook wat up-to-date is): HA zelf, OS,
