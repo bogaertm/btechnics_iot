@@ -68,6 +68,7 @@ _DATA_VIS_UNSUB = "btechnics_branding_update_vis_unsub"
 _DATA_LOCK = "btechnics_branding_update_lock"
 _DATA_GETOPTS = "btechnics_branding_update_getopts"
 _DATA_DEFER = "btechnics_branding_restart_deferred"
+_DATA_INSTALLING = "btechnics_branding_update_installing"
 MAX_ATTEMPTS = 2
 FAILED_ISSUE_PREFIX = "update_failed_"
 _INSTALL_TIMEOUT = 45 * 60  # een app of Core update mag lang duren
@@ -219,6 +220,56 @@ def backup_busy_error(err: BaseException) -> bool:
     return "backup manager busy" in str(err).lower()
 
 
+# v1.48.2: op 26 en 27/10 mislukte Core 2026.10.4 op iot.bogaert.me telkens exact
+# 30 s na de start met "Error creating backup: Backup failed: ... Preparing backup of
+# Home Assistant Core failed. Failed to inform HA Core: Unsuccessful websocket ...".
+# De Supervisor vraagt Core dan de database op slot te zetten (backup/start ->
+# recorder.backup.async_pre_backup -> lock_database, DB_LOCK_TIMEOUT = 30 s). Om
+# 04:00 is de recorder druk (statistieken van het uur). Zo'n back-upfout is tijdelijk:
+# na een pauze opnieuw proberen, binnen dezelfde run.
+BACKUP_RETRIES = 2
+BACKUP_RETRY_WAIT = 5 * 60
+_BACKUP_RETRY_RE = re.compile(
+    r"backup manager busy|error creating backup|backup failed|preparing backup"
+    r"|failed to inform ha core|could not lock database|pre-backup|pre_backup",
+    re.IGNORECASE,
+)
+
+
+def backup_retryable(err: BaseException) -> bool:
+    return bool(_BACKUP_RETRY_RE.search(str(err)))
+
+
+# v1.48.2: Defrancq 26/10: "Error updating Home Assistant Core: Downloading Home
+# Assistant version 2026.10.4 failed". De Supervisor haalt de image op bij ghcr.io;
+# een haperend netwerk of register is meestal na enkele minuten voorbij.
+_DOWNLOAD_RETRY_RE = re.compile(
+    r"download\w* .*failed|failed to download|download failed|timeout while (pulling|downloading)",
+    re.IGNORECASE,
+)
+
+
+def download_retryable(err: BaseException) -> bool:
+    return bool(_DOWNLOAD_RETRY_RE.search(str(err)))
+
+
+async def async_install_with_backup_retry(hass: HomeAssistant, data: dict, label: str) -> None:
+    """update.install; bij een tijdelijke back-up- of downloadfout tot BACKUP_RETRIES keer opnieuw."""
+    for n in range(BACKUP_RETRIES + 1):
+        try:
+            await hass.services.async_call("update", "install", data, blocking=True)
+            return
+        except Exception as err:  # noqa: BLE001
+            backup = bool(data.get("backup")) and backup_retryable(err)
+            if n >= BACKUP_RETRIES or not (backup or download_retryable(err)):
+                raise
+            soort = "back-up" if backup else "download"
+            _log(hass, f"{soort} voor {label} mislukt, nieuwe poging over "
+                       f"{BACKUP_RETRY_WAIT // 60} min: {err}")
+            await asyncio.sleep(BACKUP_RETRY_WAIT)
+            await async_wait_backup_idle(hass)
+
+
 async def async_wait_backup_idle(
     hass: HomeAssistant, timeout: float | None = None, poll: float | None = None
 ) -> str | None:
@@ -232,6 +283,32 @@ async def async_wait_backup_idle(
         if _time.monotonic() >= deadline:
             return state
         await asyncio.sleep(poll)
+
+
+# v1.48.2: Defrancq 27/10: HA herstartte tijdens de Core-update (04:22) zonder dat er
+# een resultaat gelogd werd. Na een herstart melden we of Core/OS echt nieuwer is.
+_MODULE_START = dt_util.utcnow()
+AFTER_RESTART_WINDOW = timedelta(hours=3)
+
+
+def _after_restart_check(hass: HomeAssistant, tracker: "Tracker", state, kind: str, pending: bool) -> None:
+    if kind not in ("core", "os"):
+        return
+    rec = tracker.attempts.get(state.entity_id)
+    if not rec or rec.get("nagekeken"):
+        return
+    last = dt_util.parse_datetime(str(rec.get("last")))
+    if last is None or last >= _MODULE_START or dt_util.utcnow() - last > AFTER_RESTART_WINDOW:
+        return
+    name = state.attributes.get("title") or state.attributes.get("friendly_name") or state.entity_id
+    want = rec.get("version")
+    have = state.attributes.get("installed_version")
+    if not pending or have == want:
+        _log(hass, f"{name} {want}: actief na de herstart")
+    else:
+        _log(hass, f"{name} {want}: na de herstart niet actief (nog altijd {have}); "
+                   "update mislukt of teruggezet door de Supervisor")
+    tracker.mark_done(state.entity_id)
 
 
 class Tracker:
@@ -288,6 +365,12 @@ class Tracker:
             self.reset(entity_id)
         else:
             self.attempts[entity_id]["count"] = n - 1
+            self._save()
+
+    def mark_done(self, entity_id: str) -> None:
+        """v1.48.2: resultaat van de poging is gekend (geen controle na herstart nodig)."""
+        if (rec := self.attempts.get(entity_id)) is not None:
+            rec["nagekeken"] = True
             self._save()
 
     def reset(self, entity_id: str) -> None:
@@ -482,6 +565,10 @@ async def _async_run_locked(hass: HomeAssistant, options: dict, trigger: str) ->
 
     use_backup = options.get(CONF_BACKUP, True)
     hacs_done = False
+    # v1.48.2: herstart door Core/OS zelf; enkel als die installatie echt lukte.
+    # Vroeger keken we naar de planning: mislukte Core, dan bleef een HACS-update
+    # (zoals v1.48.1 op 26/10) inactief tot een toevallige herstart.
+    system_restarts = False
     for index, upd in enumerate(todo):
         data: dict[str, Any] = {"entity_id": upd["entity_id"]}
         if use_backup and upd["backup"]:
@@ -499,10 +586,14 @@ async def _async_run_locked(hass: HomeAssistant, options: dict, trigger: str) ->
         tracker = _tracker(hass)
         if tracker:
             tracker.add_attempt(upd["entity_id"], upd["to"])
+        installing = hass.data.setdefault(_DATA_INSTALLING, set())
+        installing.add(upd["entity_id"])
         try:
             async with asyncio.timeout(_INSTALL_TIMEOUT):
-                await hass.services.async_call("update", "install", data, blocking=True)
+                await async_install_with_backup_retry(hass, data, label)
             st = hass.states.get(upd["entity_id"])
+            if upd["kind"] in ("core", "os"):
+                system_restarts = True
             if st is None or st.state == "off" or st.attributes.get("installed_version") == upd["to"]:
                 result["installed"].append(label)
                 if tracker:
@@ -512,12 +603,18 @@ async def _async_run_locked(hass: HomeAssistant, options: dict, trigger: str) ->
                 result["installed"].append(label + " (bevestiging na herstart)")
             else:
                 result["failed"].append(f"{label}: na installatie nog altijd {st.attributes.get('installed_version')}")
+                if tracker:
+                    tracker.mark_done(upd["entity_id"])
             if upd["kind"] == "hacs":
                 hacs_done = True
         except TimeoutError:
+            installing.discard(upd["entity_id"])
             result["failed"].append(f"{label}: duurde langer dan {_INSTALL_TIMEOUT // 60} minuten")
+            if tracker:
+                tracker.mark_done(upd["entity_id"])
             _LOGGER.info("BT auto-update: %s duurde te lang", label)
         except Exception as err:  # noqa: BLE001
+            installing.discard(upd["entity_id"])
             if backup_busy_error(err):
                 # v1.48.1: net tegelijk met een back-up gestart; geen fout van de update
                 if tracker:
@@ -526,8 +623,11 @@ async def _async_run_locked(hass: HomeAssistant, options: dict, trigger: str) ->
                 _LOGGER.info("BT auto-update: %s uitgesteld: %s", label, err)
                 continue
             result["failed"].append(f"{label}: {err or type(err).__name__}")
+            if tracker:
+                tracker.mark_done(upd["entity_id"])
             _LOGGER.info("BT auto-update: %s mislukt: %s", label, err)
         else:
+            installing.discard(upd["entity_id"])
             if upd["kind"] == "supervisor" and index + 1 < len(todo):
                 # v1.33.1: de Supervisor herstart zichzelf na een update. Wat nu volgt,
                 # zou falen en als mislukte poging tellen. De rest volgt de volgende nacht.
@@ -550,7 +650,7 @@ async def _async_run_locked(hass: HomeAssistant, options: dict, trigger: str) ->
     async_dispatcher_send(hass, f"{DOMAIN}_status_changed", "updates")
 
     # HACS integraties worden pas actief na een herstart. Core/OS herstart al zelf.
-    if hacs_done and not any(u["kind"] in ("core", "os") for u in todo):
+    if hacs_done and not system_restarts:
         if trigger == "op afstand" and not is_night():
             result["herstart_gepland"] = async_defer_restart(hass, options, "HACS updates op afstand")
         else:
@@ -584,13 +684,18 @@ def async_sync_visibility(hass: HomeAssistant, options: dict, only: str | None =
         kind = _kind(entry)
         latest = state.attributes.get("latest_version")
         pending = state.state == "on"
+        _after_restart_check(hass, tracker, state, kind, pending)
         if not pending:
             tracker.reset(eid)
             tracker.forget_seen(eid)
         elif kind in HOLD_KINDS:
             # v1.48.0: de wachttijd start zodra de update verschijnt, niet pas 's nachts
             tracker.first_seen(eid, latest)
-        failed = pending and tracker.count(eid, latest) >= MAX_ATTEMPTS
+        # v1.48.2: de teller gaat al omhoog voor de installatie (Core herstart HA).
+        # Tijdens die installatie is ze nog niet mislukt: anders vertrokken melding en
+        # mail "2 keer mislukt" bij de start van poging 2 (27/10, 449 en 149).
+        busy = eid in hass.data.get(_DATA_INSTALLING, ())
+        failed = pending and not busy and tracker.count(eid, latest) >= MAX_ATTEMPTS
         hide = pending and not failed and _managed(state, kind, options)
 
         if hide and entry.hidden_by is None:

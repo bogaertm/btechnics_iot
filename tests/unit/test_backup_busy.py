@@ -59,6 +59,7 @@ async def no_refresh(h): return {"fouten": []}
 au.async_refresh_hacs_custom = no_refresh
 au.async_sync_visibility = lambda *a, **k: None
 au.async_dispatcher_send = lambda *a, **k: None
+au.BACKUP_RETRY_WAIT = 0.05  # v1.48.2: busy wordt eerst opnieuw geprobeerd
 OPTS = {"auto_update": True, "auto_update_categories": ["system", "addons", "hacs"], "auto_update_backup": True}
 EID = "update.home_assistant_core_update"
 

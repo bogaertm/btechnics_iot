@@ -425,6 +425,10 @@ _BRANDS_DOMAINS = (
     "update", "homeassistant_green", "homeassistant_yellow",
     "homeassistant_sky_connect", "homeassistant_connect_zbt1",
     "homeassistant_connect_zbt2",
+    # v1.48.2: ons eigen domein (reparaties, integratielijst). De brands view eist
+    # een token dat elke 30 min wisselt; een scherm dat lang openstaat of sliep,
+    # toonde dan een kapot beeld. Ons icoon is publiek, dus zonder token.
+    "btechnics_branding",
 )
 _BRANDS_MARK = "_bt_brands_patched"
 
@@ -683,7 +687,7 @@ def _health(hass) -> dict:
 # combinatie van HA en Btechnics IOT meldt dat alles werkt, is die versie
 # bevestigd. Latere probleemmeldingen van een enkel scherm op een bevestigde
 # versie worden genegeerd (enkel gelogd). Na een update begint het opnieuw.
-_BT_VERSION = "1.48.1"
+_BT_VERSION = "1.48.2"
 _HEALTH_STORE = f"{DOMAIN}.health"
 
 

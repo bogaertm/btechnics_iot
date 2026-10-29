@@ -126,8 +126,9 @@ def _logs(hass: HomeAssistant) -> dict[str, Any]:
         return text if len(text) <= n else text[: n - 1] + "…"
 
     out: dict[str, Any] = {}
-    # Eigen gebeurtenissen: updates, op afstand, herstarts
-    out["btechnics"] = [{"at": e.get("at"), "message": cut(e.get("message"))}
+    # Eigen gebeurtenissen: updates, op afstand, herstarts. v1.48.2: 800 tekens,
+    # anders viel de oorzaak van een mislukte update weg (Unsuccessful w…).
+    out["btechnics"] = [{"at": e.get("at"), "message": cut(e.get("message"), 800)}
                          for e in list(hass.data.get("btechnics_branding_events", []))[-50:]]
     # Reparaties (alle integraties), zoals onder Instellingen > Reparaties
     repairs = []

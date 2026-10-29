@@ -284,7 +284,9 @@ function patchSidebar() {
 
 // mdiHomeAssistant pad begint zo (src/resources/home-assistant-logo-svg.ts)
 const HA_PATH_PREFIX = "m12.151 1.5882";
-const OWN_BRAND_RE = /brands\.home-assistant\.io\/(_\/)?btechnics_branding\//;
+// v1.48.2: ook /api/brands/integration/btechnics_branding/ (reparaties), want dat
+// beeld hangt aan een token dat na 30 tot 60 min vervalt.
+const OWN_BRAND_RE = /(brands\.home-assistant\.io\/(_\/)?|\/api\/brands\/integration\/)btechnics_branding\//;
 const HA_BRAND_RE = /(brands\.home-assistant\.io\/(_\/)?|\/api\/brands\/integration\/)(homeassistant|hassio|demo|homeassistant_hardware|compensation|emulated_hue|emulated_kasa|emulated_roku|lacrosse|picotts|rss_feed_template|seven_segments|simulated|syslog|tcp|telnet|trace|version|update|homeassistant_green|homeassistant_yellow|homeassistant_sky_connect|homeassistant_connect_zbt1|homeassistant_connect_zbt2)\//;
 
 // v1.29.0: ha-svg-icon elementen worden door de frontend hergebruikt (lijsten,
@@ -590,7 +592,7 @@ function patchAllInner() {
 // Wat voor onze vervanging in die cache belandde, bleef het HA huisje tonen,
 // ook al geeft de server nu het Btechnics logo. Eenmaal per versie halen we die
 // items uit alle caches; de service worker haalt ze dan opnieuw bij de server.
-const BT_VERSION = "1.48.1";
+const BT_VERSION = "1.48.2";
 const HA_CACHED_RE = new RegExp(
   "/static/(icons/(favicon|mask-icon|apple-touch-icon|maskable_icon|tile-win|logo_ohf|ohf)" +
   "|images/(home-assistant-logo|notification-badge|ohf-badge|open-home-foundation))" +
