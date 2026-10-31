@@ -32,3 +32,5 @@ register_desktop_app:
     architectuur:
       selector:
         text:
+
+get_roles:

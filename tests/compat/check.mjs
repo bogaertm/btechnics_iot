@@ -545,13 +545,13 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   // v1.33.1: https verplicht (behalve lokaal adres)
   const fout = await setOpts({ ...ALLES, status_url: "http://work.btechnics.be/api/iot/status", status_token: "testsleutel" });
   ok("Status: http naar buiten geweigerd", fout.f.type === "form" && fout.f.errors && fout.f.errors.status_url === "status_url_https", JSON.stringify(fout.f.errors));
-  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.48.3" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
+  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.49.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
   {
     const sw = b.software || [];
     const own = sw.find((x) => x.kind === "custom" && x.domain === "btechnics_branding");
     const hacs = sw.find((x) => x.entity_id === "update.test_hacs_integratie");
     const fw = sw.find((x) => x.entity_id === "update.test_faalt");
-    ok("Status: softwarelijst met alle versies (v1.45.0)", !!own && own.installed === "1.48.3" && !!hacs && hacs.kind === "hacs" && hacs.installed === "v1.0.0" && hacs.up_to_date === true && !!fw && fw.up_to_date === false && fw.latest === "2.0.0", JSON.stringify(sw.map((x) => `${x.kind}:${x.name}=${x.installed}${x.up_to_date === false ? "->" + x.latest : ""}`)));
+    ok("Status: softwarelijst met alle versies (v1.45.0)", !!own && own.installed === "1.49.0" && !!hacs && hacs.kind === "hacs" && hacs.installed === "v1.0.0" && hacs.up_to_date === true && !!fw && fw.up_to_date === false && fw.latest === "2.0.0", JSON.stringify(sw.map((x) => `${x.kind}:${x.name}=${x.installed}${x.up_to_date === false ? "->" + x.latest : ""}`)));
   }
   ok("Status: geen sleutel in het bericht", !JSON.stringify(b).includes("testsleutel"));
   {
@@ -753,6 +753,77 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
     ok("Gebruikers: ongeldige nieuwe gebruikersnaam met code", U.m6 && !U.m6.ok && U.m6.code === "username_invalid" && !!U.m6.regel, JSON.stringify(U.m6));
     ok("Gebruikers: nieuwe gebruikersnaam die al bestaat met code", U.m8 && !U.m8.ok && U.m8.code === "username_exists", JSON.stringify(U.m8));
     await batch([{ id: "m9", type: "delete_user", user_id: f1.id }, { id: "m10", type: "delete_user", user_id: f2.id }]);
+  }
+  // v1.49.0: rollen (superadmin, admin, medewerker, gebruiker) en dashboards per rol
+  {
+    const rd = (f) => { const r = spawnSync("docker", ["exec", "bt-ha", "cat", "/config/.storage/" + f], { encoding: "utf8" }); try { return JSON.parse(r.stdout).data; } catch { return null; } };
+    const side = (uid) => ((rd("frontend.user_data_" + uid) || {}).sidebar || {}).hiddenPanels || null;
+    U = await batch([
+      { id: "rol1", type: "create_user", name: "Ine Test", username: "ine.test", password: "EenLangGenoegWachtwoord2", role: "admin" },
+      { id: "rol2", type: "create_user", name: "Arne Test", username: "arne.test", role: "medewerker" },
+      { id: "rol3", type: "create_user", name: "Fout", username: "fout.test", admin: true, role: "medewerker" },
+      { id: "rol9", type: "set_role", user_id: eigenaar.id, role: "baas" },
+    ]);
+    const ine = U.rol1 && U.rol1.result, arne = U.rol2 && U.rol2.result;
+    ok("Rollen: aanmaken als admin (gewone HA-gebruiker)", U.rol1 && U.rol1.ok && ine.role === "admin" && ine.admin === false && !ine.password && (await login("ine.test", "EenLangGenoegWachtwoord2")), JSON.stringify(U.rol1));
+    ok("Rollen: aanmaken als medewerker", U.rol2 && U.rol2.ok && arne.role === "medewerker" && arne.admin === false, JSON.stringify(U.rol2 && { ...U.rol2, result: { ...arne, password: "***" } }));
+    ok("Rollen: admin en role die elkaar tegenspreken geweigerd", U.rol3 && !U.rol3.ok && /tegen/.test(U.rol3.error), JSON.stringify(U.rol3));
+    ok("Rollen: onbekende rol geweigerd", U.rol9 && !U.rol9.ok && /rol moet/.test(U.rol9.error), JSON.stringify(U.rol9));
+    let st = (await (await fetch(BASE + "/api/services/btechnics_branding/send_status?return_response", { method: "POST", headers: H, body: "{}" })).json()).service_response.bericht;
+    const paden = ((st.rollen || {}).panels || []).map((p) => p.url_path);
+    ok("Rollen: status toont rol per gebruiker en de dashboards", (st.users || []).some((u) => u.id === ine.id && u.role === "admin") && (st.users || []).some((u) => u.id === eigenaar.id && u.role === "superadmin") && paden.includes("map") && paden.includes("logbook") && !paden.includes("config") && !paden.includes("notfound") && !paden.includes("_my_redirect"), JSON.stringify({ paden, users: (st.users || []).map((u) => u.username + ":" + u.role) }));
+    U = await batch([
+      { id: "rol4", type: "set_dashboards", dashboards: { map: ["admin"], logbook: ["admin", "medewerker"] } },
+      { id: "rol5", type: "set_dashboards", dashboards: { bestaatniet: ["admin"] } },
+      { id: "rol10", type: "set_dashboards", dashboards: { map: ["superadmin"] } },
+    ]);
+    await sleep(1500);
+    ok("Rollen: dashboards per rol ingesteld", U.rol4 && U.rol4.ok && U.rol4.result.dashboards.map[0] === "admin", JSON.stringify(U.rol4));
+    ok("Rollen: onbekend dashboard of rol geweigerd", U.rol5 && !U.rol5.ok && U.rol10 && !U.rol10.ok, JSON.stringify([U.rol5, U.rol10]));
+    let hA = side(arne.id), hI = side(ine.id), hE = side(eigenaar.id);
+    ok("Rollen: medewerker ziet kaart niet, logboek wel (zijbalk)", Array.isArray(hA) && hA.includes("map") && !hA.includes("logbook"), JSON.stringify(hA));
+    ok("Rollen: admin ziet beide", !hI || (!hI.includes("map") && !hI.includes("logbook")), JSON.stringify(hI));
+    ok("Rollen: superadmin ziet alles", !hE || (!hE.includes("map") && !hE.includes("logbook")), JSON.stringify(hE));
+    U = await batch([
+      { id: "rol6", type: "set_role", user_id: arne.id, role: "admin" },
+      { id: "rol7", type: "set_role", user_id: eigenaar.id, role: "medewerker" },
+    ]);
+    await sleep(1500);
+    hA = side(arne.id);
+    ok("Rollen: rol wijzigen past de zijbalk aan", U.rol6 && U.rol6.ok && U.rol6.result.role === "admin" && Array.isArray(hA) && !hA.includes("map"), JSON.stringify({ rol6: U.rol6, hA }));
+    ok("Rollen: eigenaar blijft superadmin", U.rol7 && !U.rol7.ok && /eigenaar/.test(U.rol7.error), JSON.stringify(U.rol7));
+    U = await batch([{ id: "rol8", type: "set_role", user_id: arne.id, role: "superadmin" }]);
+    const opslag = rd("btechnics_roles") || {};
+    ok("Rollen: superadmin wordt HA-beheerder, niet opgeslagen", U.rol8 && U.rol8.ok && U.rol8.result.admin === true && U.rol8.result.role === "superadmin" && !(opslag.admin || []).includes(arne.id) && (opslag.admin || []).includes(ine.id), JSON.stringify({ rol8: U.rol8 && U.rol8.result, opslag }));
+    const gr = await (await fetch(BASE + "/api/services/btechnics_branding/get_roles?return_response", { method: "POST", headers: H, body: "{}" })).json();
+    const gu = ((gr.service_response || {}).users || []);
+    ok("Rollen: service get_roles voor VTO en VIGI", gu.some((u) => u.user_id === ine.id && u.role === "admin") && gu.some((u) => u.user_id === arne.id && u.role === "superadmin") && (gr.service_response.dashboards || {}).map, JSON.stringify(gr).slice(0, 400));
+    U = await batch([
+      { id: "rol11", type: "set_role", user_id: arne.id, role: "gebruiker" },
+      { id: "rol12", type: "update_user", user_id: ine.id, active: false },
+    ]);
+    ok("Rollen: terug naar gewone gebruiker en uitschakelen", U.rol11 && U.rol11.ok && U.rol11.result.admin === false && U.rol11.result.role === "gebruiker" && U.rol12 && U.rol12.ok && U.rol12.result.active === false && !(await login("ine.test", "EenLangGenoegWachtwoord2")), JSON.stringify([U.rol11, U.rol12]));
+    // review v1.49.0: uit het beheer halen geeft onze verborgen panelen terug, de rest blijft
+    let hA2 = side(arne.id);
+    U = await batch([{ id: "rol16", type: "set_dashboards", dashboards: { map: ["admin"] } }]);
+    await sleep(1500);
+    const hA3 = side(arne.id);
+    ok("Rollen: dashboard uit het beheer komt terug in de zijbalk", Array.isArray(hA2) && hA2.includes("logbook") && Array.isArray(hA3) && hA3.includes("map") && !hA3.includes("logbook"), JSON.stringify({ voor: hA2, na: hA3 }));
+    // review v1.49.0: een uitgeschakelde beheerder echt degraderen (is_admin is dan False in HA)
+    U = await batch([
+      { id: "rol17", type: "set_role", user_id: arne.id, role: "superadmin" },
+      { id: "rol18", type: "update_user", user_id: arne.id, active: false },
+      { id: "rol19", type: "set_role", user_id: arne.id, role: "medewerker" },
+      { id: "rol20", type: "update_user", user_id: arne.id, active: true },
+    ]);
+    ok("Rollen: uitgeschakelde beheerder wordt echt medewerker", U.rol19 && U.rol19.ok && U.rol20 && U.rol20.ok && U.rol20.result.admin === false && U.rol20.result.role === "medewerker", JSON.stringify([U.rol19, U.rol20]));
+    U = await batch([
+      { id: "rol13", type: "delete_user", user_id: ine.id },
+      { id: "rol14", type: "delete_user", user_id: arne.id },
+      { id: "rol15", type: "set_dashboards", dashboards: {} },
+    ]);
+    const na = rd("btechnics_roles") || {};
+    ok("Rollen: verwijderde gebruiker ook uit de rollen", U.rol13 && U.rol13.ok && !(na.admin || []).includes(ine.id) && U.rol15 && U.rol15.ok && Object.keys(na.dashboards || {}).length === 0, JSON.stringify(na));
   }
   const sm = (await (await fetch(BASE + "/api/services/btechnics_branding/send_status?return_response", { method: "POST", headers: H, body: "{}" })).json()).service_response.bericht;
   ok("Gebruikers: klant ziet een melding in HA", (sm.logs.notifications || []).some((n) => /gebruikersbeheer/i.test(n.title)), (sm.logs.notifications || []).map((n) => n.title).join(","));

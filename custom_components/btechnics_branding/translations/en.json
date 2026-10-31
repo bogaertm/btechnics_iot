@@ -109,6 +109,10 @@
           "description": "arm64 or x64."
         }
       }
+    },
+    "get_roles": {
+      "name": "Get roles",
+      "description": "Users with their Btechnics role and the dashboards per role (for Btechnics VTO and VIGI)."
     }
   }
 }

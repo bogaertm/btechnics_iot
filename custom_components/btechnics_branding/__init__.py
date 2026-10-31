@@ -687,7 +687,7 @@ def _health(hass) -> dict:
 # combinatie van HA en Btechnics IOT meldt dat alles werkt, is die versie
 # bevestigd. Latere probleemmeldingen van een enkel scherm op een bevestigde
 # versie worden genegeerd (enkel gelogd). Na een update begint het opnieuw.
-_BT_VERSION = "1.48.3"
+_BT_VERSION = "1.49.0"
 _HEALTH_STORE = f"{DOMAIN}.health"
 
 
@@ -877,6 +877,8 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
     await status.async_setup(hass, lambda: dict(entry.options))
     await remote.async_setup(hass, entry)
     await desktop.async_setup(hass)
+    from . import roles
+    await roles.async_setup(hass)  # v1.49.0
     app_download.async_setup(hass)  # v1.36.0: zijbalk-item om de desktop-app te downloaden
 
     if hass.is_running:

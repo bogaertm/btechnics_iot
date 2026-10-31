@@ -6,6 +6,8 @@ Overzicht van de gebruikers gaat mee in de status. Opdrachten (via remote.py):
 - set_password   nieuw wachtwoord (of laten maken), eventueel overal afmelden
 - logout_user    alle sessies van de gebruiker beeindigen
 - delete_user    gebruiker verwijderen
+- set_role       rol kiezen: superadmin, admin, medewerker of gebruiker (v1.49.0, roles.py)
+  create_user kan ook meteen een rol krijgen ("role").
 
 Veiligheidsregels, altijd:
 - systeemgebruikers (Supervisor, add-ons) worden nooit getoond of aangepast;
@@ -81,8 +83,23 @@ def _info(user) -> dict[str, Any]:
     }
 
 
+def _out(hass: HomeAssistant, user) -> dict[str, Any]:
+    """v1.49.0: info plus rol."""
+    from . import roles
+    return {**_info(user), "role": roles.role(hass, user)}
+
+
 async def async_list(hass: HomeAssistant) -> list[dict[str, Any]]:
-    return [_info(u) for u in await hass.auth.async_get_users() if not u.system_generated]
+    from . import roles
+    await roles.async_load(hass)
+    return [_out(hass, u) for u in await hass.auth.async_get_users() if not u.system_generated]
+
+
+def _check_role(raw: Any) -> str:
+    from . import roles
+    if raw not in roles.ROLES:
+        raise ValueError("rol moet " + ", ".join(roles.ROLES) + " zijn")
+    return raw
 
 
 def _new_password() -> str:
@@ -146,6 +163,11 @@ async def async_execute(hass: HomeAssistant, kind: str, cmd: dict) -> dict[str, 
         password = _new_password() if generated else cmd["password"]
         _check_password(password)
         admin = _bool(cmd, "admin", False)
+        role = _check_role(cmd["role"]) if "role" in cmd else None
+        if role is not None:
+            if "admin" in cmd and admin != (role == "superadmin"):
+                raise ValueError("admin en role spreken elkaar tegen")
+            admin = role == "superadmin"
         local_only = _bool(cmd, "local_only", False)
         user = await hass.auth.async_create_user(
             name, group_ids=[GROUP_ID_ADMIN if admin else GROUP_ID_USER], local_only=local_only,
@@ -156,6 +178,9 @@ async def async_execute(hass: HomeAssistant, kind: str, cmd: dict) -> dict[str, 
             added = True
             creds = await provider.async_get_or_create_credentials({"username": username})
             await hass.auth.async_link_user(user, creds)
+            from . import roles
+            if role in roles.STORED:
+                await roles.async_store_role(hass, user.id, role)
         except Exception:
             if added:
                 try:
@@ -164,7 +189,12 @@ async def async_execute(hass: HomeAssistant, kind: str, cmd: dict) -> dict[str, 
                     pass
             await hass.auth.async_remove_user(user)
             raise
-        out = _info(user)
+        from . import roles
+        try:
+            await roles.async_apply_sidebar(hass, user)
+        except Exception:  # noqa: BLE001
+            pass  # de zijbalk volgt bij het volgende event of de volgende start
+        out = _out(hass, user)
         if generated:
             out["password"] = password  # eenmalig, enkel in het resultaat
         return out
@@ -211,7 +241,12 @@ async def async_execute(hass: HomeAssistant, kind: str, cmd: dict) -> dict[str, 
             await provider.async_change_username(cred, new_username)
         if kwargs:
             await hass.auth.async_update_user(user, **kwargs)
-        return _info(await _get(hass, cmd))
+        from . import roles
+        user = await _get(hass, cmd)
+        if roles.is_admin_group(user):
+            await roles.async_forget_user(hass, user.id)  # v1.49.0: superadmin, geen opgeslagen rol
+        await roles.async_apply_sidebar(hass, user)
+        return _out(hass, user)
 
     if kind == "set_password":
         user = await _get(hass, cmd)
@@ -250,9 +285,40 @@ async def async_execute(hass: HomeAssistant, kind: str, cmd: dict) -> dict[str, 
         # Zoals HA zelf (config/auth delete): gebruiker en zijn aanmeldgegevens samen weg
         name = user.name
         await hass.auth.async_remove_user(user)
+        from . import roles
+        await roles.async_forget_user(hass, user.id, removed=True)
         return {"user_id": user.id, "name": name, "verwijderd": True}
+
+    if kind == "set_role":
+        from . import roles
+        user = await _get(hass, cmd)
+        new = _check_role(cmd.get("role"))
+        if new == roles.SUPER:
+            if not roles.is_admin_group(user):
+                await hass.auth.async_update_user(user, group_ids=_groups(user, True))
+            await roles.async_forget_user(hass, user.id)
+        else:
+            if user.is_owner:
+                raise ValueError("de eigenaar blijft superadmin")
+            # review: naar de groep kijken, een uitgeschakelde beheerder heeft is_admin False
+            if roles.is_admin_group(user) and user.is_active and await _admins_left(hass, user) == 0:
+                raise ValueError("er moet minstens een actieve beheerder overblijven")
+            # review 2: eerst de rol bewaren (faalt dat, dan is er niets veranderd),
+            # pas daarna uit de beheerdersgroep
+            await roles.async_store_role(hass, user.id, new)
+            if roles.is_admin_group(user):
+                await hass.auth.async_update_user(user, group_ids=_groups(user, False))
+        user = await _get(hass, cmd)
+        await roles.async_apply_sidebar(hass, user)
+        return _out(hass, user)
+
+    if kind == "set_dashboards":
+        from . import roles
+        out = await roles.async_set_dashboards(hass, cmd.get("dashboards"))
+        return {**out, "name": "dashboards per rol"}
 
     raise ValueError(f"onbekende opdracht: {kind}")
 
 
-KINDS = ("create_user", "update_user", "set_password", "logout_user", "delete_user")
+KINDS = ("create_user", "update_user", "set_password", "logout_user", "delete_user",
+         "set_role", "set_dashboards")

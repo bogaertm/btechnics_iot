@@ -16,7 +16,8 @@ Enkel deze opdrachten bestaan; al de rest wordt geweigerd:
 - send_status       meteen de status versturen
 - restart           Home Assistant herstarten (enkel na een geslaagde configuratiecontrole)
 - reboot_host       het toestel herstarten (enkel HA OS / Supervised)
-- create_user, update_user, set_password, logout_user, delete_user  (users.py,
+- create_user, update_user, set_password, logout_user, delete_user, set_role,
+  set_dashboards  (users.py en roles.py,
   enkel als "Gebruikersbeheer op afstand" aan staat, standaard uit)
 
 Veiligheid (v1.35.0, na audit):
@@ -145,6 +146,7 @@ def _notify_users(hass: HomeAssistant, kind: str, data: dict, cmd_id: str, error
         "create_user": "een gebruiker aangemaakt", "update_user": "een gebruiker aangepast",
         "set_password": "een wachtwoord gewijzigd", "logout_user": "een gebruiker overal afgemeld",
         "delete_user": "een gebruiker verwijderd",
+        "set_role": "een rol gewijzigd", "set_dashboards": "de dashboards per rol gewijzigd",
     }.get(kind, kind)
     naam = data.get("name") or data.get("username") or data.get("user_id") or ""
     tijd = dt_util.now().strftime("%d/%m/%Y %H:%M")

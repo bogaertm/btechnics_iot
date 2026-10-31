@@ -109,6 +109,10 @@
           "description": "arm64 of x64."
         }
       }
+    },
+    "get_roles": {
+      "name": "Rollen opvragen",
+      "description": "Gebruikers met hun Btechnics-rol en de dashboards per rol (voor Btechnics VTO en VIGI)."
     }
   }
 }

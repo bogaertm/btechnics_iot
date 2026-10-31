@@ -279,6 +279,15 @@ async def async_build(hass: HomeAssistant, options: dict, reason: str) -> dict[s
                          for u in await users.async_list(hass)]
         except Exception:  # noqa: BLE001
             user_list = None
+    rollen_blok = None
+    if options.get(users.CONF_REMOTE_USERS, False):
+        from . import roles
+        try:
+            rollen_blok = await roles.async_status(hass)
+            for p in rollen_blok["panels"]:
+                p["title"] = _safe(p["title"])
+        except Exception:  # noqa: BLE001
+            rollen_blok = None
     from . import toegang
     toegang_blok = await toegang.async_status(hass, options)
     from . import desktop
@@ -287,6 +296,7 @@ async def async_build(hass: HomeAssistant, options: dict, reason: str) -> dict[s
     except Exception:  # noqa: BLE001
         desktop_apps = None
     return {
+        "rollen": rollen_blok,
         "desktop_apps": desktop_apps,
         # v1.46.0: deurtoegang (btechnics_toegang), enkel als de optie aan staat
         **({"toegang": toegang_blok} if toegang_blok is not None else {}),
