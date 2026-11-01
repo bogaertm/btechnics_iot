@@ -569,6 +569,88 @@ function patchSidebarAppItem() {
   deepQuery(document, "ha-sidebar").forEach(el => { try { el.requestUpdate("_panelOrder", null); } catch (e) {} });
 }
 
+// v1.50.0: rol van de aangemelde gebruiker op de profielpagina, en "Zijbalk bewerken"
+// weg voor Admin, Medewerker en Gebruiker (de zijbalk volgt hun rol, zie roles.py).
+// Dat is cosmetisch: de server zet verborgen panelen ook zelf opnieuw verborgen.
+// Bronnen (frontend): het dialoog "dialog-edit-sidebar" opent via een "show-dialog"
+// event (src/dialogs/sidebar/show-dialog-edit-sidebar.ts), vanuit ha-sidebar (lang
+// drukken) en vanuit het profiel (ha-row-item "customize_sidebar").
+let btRole = null, btRoleAt = 0, btRoleBusy = false;
+const BT_ROLE_TXT = {
+  nl: { rol: "Rol", superadmin: "Superadmin", admin: "Admin", medewerker: "Medewerker", gebruiker: "Gebruiker" },
+  fr: { rol: "Rôle", superadmin: "Superadmin", admin: "Admin", medewerker: "Collaborateur", gebruiker: "Utilisateur" },
+  en: { rol: "Role", superadmin: "Superadmin", admin: "Admin", medewerker: "Staff", gebruiker: "User" },
+};
+function btHass() {
+  const el = document.querySelector("home-assistant");
+  return el && el.hass;
+}
+function loadRole() {
+  const hass = btHass();
+  if (!hass || !hass.user || !hass.connection) return;
+  const fresh = btRole && btRole.uid === hass.user.id && Date.now() - btRoleAt < 60000;
+  if (fresh || btRoleBusy) return;
+  if (hass.user.is_admin) {  // beheerder in HA = superadmin, geen vraag nodig
+    btRole = { role: "superadmin", zijbalk_vast: false, uid: hass.user.id }; btRoleAt = Date.now();
+    return;
+  }
+  btRoleBusy = true;
+  hass.connection.sendMessagePromise({ type: "btechnics_branding/my_role" })
+    .then((r) => { btRole = { ...r, uid: hass.user.id }; btRoleAt = Date.now(); schedulePatch(); })
+    .catch(() => {
+      // review 1.50.0: oudere server (nieuwe JS voor de herstart) of geen verbinding:
+      // niets blokkeren en pas na 60 s opnieuw vragen, geen lus
+      btRole = { role: null, zijbalk_vast: false, uid: hass.user.id }; btRoleAt = Date.now();
+    })
+    .finally(() => { btRoleBusy = false; });
+}
+function sidebarLocked() {
+  const hass = btHass();
+  return !!(btRole && btRole.zijbalk_vast && hass && hass.user && btRole.uid === hass.user.id);
+}
+window.addEventListener("show-dialog", (ev) => {
+  if (ev && ev.detail && ev.detail.dialogTag === "dialog-edit-sidebar" && sidebarLocked()) {
+    ev.stopImmediatePropagation();
+    ev.preventDefault();
+  }
+}, true);
+function patchProfile() {
+  loadRole();
+  if (!location.pathname.startsWith("/profile")) return;
+  const hass = btHass();
+  if (!hass || !hass.user || !btRole || btRole.uid !== hass.user.id || !btRole.role) return;
+  const lang = String(hass.language || "nl").slice(0, 2);
+  const T = BT_ROLE_TXT[lang] || BT_ROLE_TXT.nl;
+  const txt = T.rol + ": " + (T[btRole.role] || btRole.role);
+  // HA 2026.10: ha-profile-dashboard (.heading .details); 2026.9: ha-profile-section-general (ha-card .card-content)
+  for (const host of deepQuery(document, "ha-profile-dashboard, ha-profile-section-general")) {
+    const sr = host.shadowRoot;
+    const target = sr && (sr.querySelector(".heading .details") || sr.querySelector("ha-card .card-content"));
+    if (!target) continue;
+    let el = target.querySelector(".bt-role");
+    if (!el) {
+      el = document.createElement("div");
+      el.className = "bt-role";
+      el.style.cssText = "font-size: 0.875em; opacity: 0.8; margin-top: 4px;";
+      target.appendChild(el);
+    }
+    if (el.textContent !== txt) el.textContent = txt;
+  }
+  const locked = sidebarLocked();
+  const kop = typeof hass.localize === "function" ? hass.localize("ui.panel.profile.customize_sidebar.header") : "";
+  for (const row of deepQuery(document, "ha-row-item")) {
+    if (!locked) {  // rol gewijzigd naar superadmin: terug tonen
+      if (row.dataset.btHid) { row.style.display = ""; delete row.dataset.btHid; }
+      continue;
+    }
+    const h = row.querySelector('[slot="headline"]');
+    if (kop && h && h.textContent.trim() === kop && !row.dataset.btHid) {
+      row.style.display = "none";
+      row.dataset.btHid = "1";
+    }
+  }
+}
+
 function patchAllInner() {
   disableSurvey();
   patchCloud();
@@ -577,6 +659,7 @@ function patchAllInner() {
   patchLoginPage();
   patchSidebar();
   patchSidebarAppItem();
+  patchProfile();  // v1.50.0
   patchInlineLogos();
   patchExternalLinks();
   patchColors();
@@ -592,7 +675,7 @@ function patchAllInner() {
 // Wat voor onze vervanging in die cache belandde, bleef het HA huisje tonen,
 // ook al geeft de server nu het Btechnics logo. Eenmaal per versie halen we die
 // items uit alle caches; de service worker haalt ze dan opnieuw bij de server.
-const BT_VERSION = "1.49.0";
+const BT_VERSION = "1.50.0";
 const HA_CACHED_RE = new RegExp(
   "/static/(icons/(favicon|mask-icon|apple-touch-icon|maskable_icon|tile-win|logo_ohf|ohf)" +
   "|images/(home-assistant-logo|notification-badge|ohf-badge|open-home-foundation))" +

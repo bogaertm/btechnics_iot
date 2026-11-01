@@ -378,6 +378,8 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   await sleep(2000);
 
   const ws = (msg) => page.evaluate((m) => document.querySelector("home-assistant").hass.callWS(m), msg);
+  // v1.50.0: de test duurt langer dan de 30 min van het token uit de onboarding
+  H.authorization = "Bearer " + (await ws({ type: "auth/long_lived_access_token", client_name: "Btechnics compat test", lifespan: 2 }));
   const reg = async (eid) => (await ws({ type: "config/entity_registry/get", entity_id: eid }));
   const st = async (eid) => (await fetch(BASE + "/api/states/" + eid, { headers: H })).json();
   const issues = async () => (await ws({ type: "repairs/list_issues" })).issues.filter((i) => i.domain === "btechnics_branding").map((i) => i.issue_id);
@@ -545,13 +547,13 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   // v1.33.1: https verplicht (behalve lokaal adres)
   const fout = await setOpts({ ...ALLES, status_url: "http://work.btechnics.be/api/iot/status", status_token: "testsleutel" });
   ok("Status: http naar buiten geweigerd", fout.f.type === "form" && fout.f.errors && fout.f.errors.status_url === "status_url_https", JSON.stringify(fout.f.errors));
-  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.49.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
+  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.50.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
   {
     const sw = b.software || [];
     const own = sw.find((x) => x.kind === "custom" && x.domain === "btechnics_branding");
     const hacs = sw.find((x) => x.entity_id === "update.test_hacs_integratie");
     const fw = sw.find((x) => x.entity_id === "update.test_faalt");
-    ok("Status: softwarelijst met alle versies (v1.45.0)", !!own && own.installed === "1.49.0" && !!hacs && hacs.kind === "hacs" && hacs.installed === "v1.0.0" && hacs.up_to_date === true && !!fw && fw.up_to_date === false && fw.latest === "2.0.0", JSON.stringify(sw.map((x) => `${x.kind}:${x.name}=${x.installed}${x.up_to_date === false ? "->" + x.latest : ""}`)));
+    ok("Status: softwarelijst met alle versies (v1.45.0)", !!own && own.installed === "1.50.0" && !!hacs && hacs.kind === "hacs" && hacs.installed === "v1.0.0" && hacs.up_to_date === true && !!fw && fw.up_to_date === false && fw.latest === "2.0.0", JSON.stringify(sw.map((x) => `${x.kind}:${x.name}=${x.installed}${x.up_to_date === false ? "->" + x.latest : ""}`)));
   }
   ok("Status: geen sleutel in het bericht", !JSON.stringify(b).includes("testsleutel"));
   {
@@ -758,6 +760,24 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   {
     const rd = (f) => { const r = spawnSync("docker", ["exec", "bt-ha", "cat", "/config/.storage/" + f], { encoding: "utf8" }); try { return JSON.parse(r.stdout).data; } catch { return null; } };
     const side = (uid) => ((rd("frontend.user_data_" + uid) || {}).sidebar || {}).hiddenPanels || null;
+    // v1.50.0: aanmelden als een andere gebruiker (token) en websocket als die gebruiker
+    const tokenVoor = async (u, pw) => {
+      let f = await (await fetch(BASE + "/auth/login_flow", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client_id: CLIENT_ID, handler: ["homeassistant", null], redirect_uri: CLIENT_ID }) })).json();
+      f = await (await fetch(BASE + "/auth/login_flow/" + f.flow_id, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client_id: CLIENT_ID, username: u, password: pw }) })).json();
+      if (f.type !== "create_entry") return null;
+      return (await fetch(BASE + "/auth/token", { method: "POST", body: new URLSearchParams({ grant_type: "authorization_code", code: f.result, client_id: CLIENT_ID }) })).json();
+    };
+    const wsAls = (tok, msg) => new Promise((res) => {
+      const w = new WebSocket(BASE.replace(/^http/, "ws") + "/api/websocket");
+      const t = setTimeout(() => { try { w.close(); } catch {} res({ error: "timeout" }); }, 15000);
+      w.onmessage = (e) => { const m = JSON.parse(e.data);
+        if (m.type === "auth_required") w.send(JSON.stringify({ type: "auth", access_token: tok.access_token }));
+        else if (m.type === "auth_ok") w.send(JSON.stringify({ id: 1, ...msg }));
+        else if (m.id === 1) { clearTimeout(t); try { w.close(); } catch {} res(m); } };
+      w.onerror = () => {};
+    });
+    const core = (uid) => (rd("frontend.user_data_" + uid) || {}).core || {};
+    const statusNu = async () => (await (await fetch(BASE + "/api/services/btechnics_branding/send_status?return_response", { method: "POST", headers: H, body: "{}" })).json()).service_response.bericht;
     U = await batch([
       { id: "rol1", type: "create_user", name: "Ine Test", username: "ine.test", password: "EenLangGenoegWachtwoord2", role: "admin" },
       { id: "rol2", type: "create_user", name: "Arne Test", username: "arne.test", role: "medewerker" },
@@ -784,6 +804,57 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
     ok("Rollen: medewerker ziet kaart niet, logboek wel (zijbalk)", Array.isArray(hA) && hA.includes("map") && !hA.includes("logbook"), JSON.stringify(hA));
     ok("Rollen: admin ziet beide", !hI || (!hI.includes("map") && !hI.includes("logbook")), JSON.stringify(hI));
     ok("Rollen: superadmin ziet alles", !hE || (!hE.includes("map") && !hE.includes("logbook")), JSON.stringify(hE));
+    // v1.50.0: leesbare titels en "bewerkbaar" in de status
+    {
+      const pn = ((await statusNu()).rollen || {}).panels || [];
+      const lb = pn.find((p) => p.url_path === "logbook"), hi = pn.find((p) => p.url_path === "history");
+      ok("Rollen 1.50: leesbare titels voor de standaardpanelen", !!lb && lb.title === "Activiteit" && !!hi && hi.title === "Geschiedenis" && pn.every((p) => typeof p.bewerkbaar === "boolean") && !pn.some((p) => /^[a-z_]+$/.test(p.title) && ["energy", "history", "logbook", "media_browser", "calendar", "map"].includes(p.title)), JSON.stringify(pn.map((p) => p.url_path + "=" + p.title)));
+    }
+    // v1.50.0: eigen rol via de websocket, als die gebruiker
+    const tIne = await tokenVoor("ine.test", "EenLangGenoegWachtwoord2");
+    const tArne = arne && arne.password ? await tokenVoor("arne.test", arne.password) : null;
+    const mrI = tIne ? await wsAls(tIne, { type: "btechnics_branding/my_role" }) : null;
+    const mrA = tArne ? await wsAls(tArne, { type: "btechnics_branding/my_role" }) : null;
+    const mrE = await ws({ type: "btechnics_branding/my_role" }).catch((e) => ({ error: String(e) }));
+    ok("Rollen 1.50: eigen rol opvragen (admin, medewerker, superadmin)", mrI && mrI.success && mrI.result.role === "admin" && mrI.result.zijbalk_vast === true && mrA && mrA.success && mrA.result.role === "medewerker" && mrE && mrE.role === "superadmin" && mrE.zijbalk_vast === false, JSON.stringify([mrI, mrA, mrE]));
+    // v1.50.0: medewerker zet zelf de kaart terug zichtbaar -> server verbergt ze opnieuw
+    if (tArne) {
+      const zet = await wsAls(tArne, { type: "frontend/set_user_data", key: "sidebar", value: { panelOrder: ["logbook"], hiddenPanels: [] } });
+      await sleep(2500);
+      const hTerug = side(arne.id), sbA = (rd("frontend.user_data_" + arne.id) || {}).sidebar || {};
+      ok("Rollen 1.50: zelf teruggezet paneel wordt opnieuw verborgen, volgorde blijft", zet && zet.success && Array.isArray(hTerug) && hTerug.includes("map") && (sbA.panelOrder || [])[0] === "logbook", JSON.stringify({ zet, hTerug, sbA }));
+    } else ok("Rollen 1.50: zelf teruggezet paneel wordt opnieuw verborgen, volgorde blijft", false, "geen token voor arne");
+    // v1.50.0: profielpagina toont de rol, Zijbalk bewerken weg voor admin
+    if (tIne) {
+      const pctx = await browser.newContext({ viewport: { width: 1400, height: 900 } });
+      await pctx.addInitScript((t) => { localStorage.setItem("hassTokens", JSON.stringify(t)); localStorage.setItem("selectedLanguage", JSON.stringify("nl")); },
+        { ...tIne, hassUrl: BASE, clientId: CLIENT_ID, expires: Date.now() + tIne.expires_in * 1000 });
+      const pp = await pctx.newPage();
+      // HA 2026.10: rol op /profile, Zijbalk bewerken op /profile/preferences; HA 2026.9: alles op /profile/general
+      const kijk = async (pg) => pg.evaluate(() => {
+        const all = (root, sel, out = []) => { root.querySelectorAll(sel).forEach((e) => out.push(e)); root.querySelectorAll("*").forEach((e) => e.shadowRoot && all(e.shadowRoot, sel, out)); return out; };
+        const hass = document.querySelector("home-assistant").hass;
+        const kop = hass.localize("ui.panel.profile.customize_sidebar.header");
+        const rows = all(document, "ha-row-item").filter((r) => { const h = r.querySelector('[slot="headline"]'); return h && h.textContent.trim() === kop; });
+        return { pad: location.pathname, rol: all(document, ".bt-role").map((e) => e.textContent), rows: rows.length, zichtbaar: rows.filter((r) => r.offsetParent !== null).length };
+      });
+      const bezoek = async (pg) => { const out = []; for (const pad of ["/profile", "/profile/preferences"]) { await pg.goto(BASE + pad); await sleep(8000); out.push(await kijk(pg)); } return out; };
+      const pI = await bezoek(pp);
+      const prof = { rol: pI[0].rol, rows: pI[0].rows + pI[1].rows, zichtbaar: pI[0].zichtbaar + pI[1].zichtbaar, pI };
+      // lang drukken op de titel van de zijbalk opent het dialoog via show-dialog: geblokkeerd
+      await pp.evaluate(() => { const ha = document.querySelector("home-assistant"); const sb = ha.shadowRoot.querySelector("home-assistant-main").shadowRoot.querySelector("ha-sidebar");
+        sb.dispatchEvent(new CustomEvent("show-dialog", { bubbles: true, composed: true, detail: { dialogTag: "dialog-edit-sidebar", dialogImport: () => import("/frontend_latest/app.js").catch(() => null), dialogParams: {} } })); });
+      await sleep(2500);
+      const dlg = await pp.evaluate(() => { const all = (root, sel, out = []) => { root.querySelectorAll(sel).forEach((e) => out.push(e)); root.querySelectorAll("*").forEach((e) => e.shadowRoot && all(e.shadowRoot, sel, out)); return out; }; return all(document, "dialog-edit-sidebar").length; });
+      ok("Rollen 1.50: profiel toont de rol van de gebruiker", prof.rol.length > 0 && prof.rol.every((t) => t === "Rol: Admin"), JSON.stringify(prof));
+      ok("Rollen 1.50: Zijbalk bewerken verborgen en geblokkeerd voor admin", prof.rows >= 1 && prof.zichtbaar === 0 && dlg === 0, JSON.stringify({ prof, dlg }));
+      await pctx.close();
+      const pe = await ctx.newPage();
+      const pE = await bezoek(pe);
+      const profE = { rol: pE[0].rol, zichtbaar: pE[0].zichtbaar + pE[1].zichtbaar, pE };
+      ok("Rollen 1.50: superadmin ziet Rol: Superadmin en Zijbalk bewerken", profE.rol.length > 0 && profE.rol.every((t) => /Superadmin/.test(t)) && profE.zichtbaar >= 1, JSON.stringify(profE));
+      await pe.close();
+    } else ok("Rollen 1.50: profiel toont de rol van de gebruiker", false, "geen token voor ine");
     U = await batch([
       { id: "rol6", type: "set_role", user_id: arne.id, role: "admin" },
       { id: "rol7", type: "set_role", user_id: eigenaar.id, role: "medewerker" },
@@ -792,6 +863,10 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
     hA = side(arne.id);
     ok("Rollen: rol wijzigen past de zijbalk aan", U.rol6 && U.rol6.ok && U.rol6.result.role === "admin" && Array.isArray(hA) && !hA.includes("map"), JSON.stringify({ rol6: U.rol6, hA }));
     ok("Rollen: eigenaar blijft superadmin", U.rol7 && !U.rol7.ok && /eigenaar/.test(U.rol7.error), JSON.stringify(U.rol7));
+    {
+      const lg = ((await statusNu()).logs || {}).btechnics || [];
+      ok("Rollen 1.50: rolwijziging via Work in het logboek", lg.some((e) => /rol van Arne Test: Medewerker → Admin \(via Work\)/.test(e.message)), JSON.stringify(lg.slice(-6)));
+    }
     U = await batch([{ id: "rol8", type: "set_role", user_id: arne.id, role: "superadmin" }]);
     const opslag = rd("btechnics_roles") || {};
     ok("Rollen: superadmin wordt HA-beheerder, niet opgeslagen", U.rol8 && U.rol8.ok && U.rol8.result.admin === true && U.rol8.result.role === "superadmin" && !(opslag.admin || []).includes(arne.id) && (opslag.admin || []).includes(ine.id), JSON.stringify({ rol8: U.rol8 && U.rol8.result, opslag }));
@@ -817,6 +892,76 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
       { id: "rol20", type: "update_user", user_id: arne.id, active: true },
     ]);
     ok("Rollen: uitgeschakelde beheerder wordt echt medewerker", U.rol19 && U.rol19.ok && U.rol20 && U.rol20.ok && U.rol20.result.admin === false && U.rol20.result.role === "medewerker", JSON.stringify([U.rol19, U.rol20]));
+    // v1.50.0: rol gewijzigd in HA zelf -> logregel en melding
+    await ws({ type: "config/auth/update", user_id: arne.id, group_ids: ["system-admin"] });
+    await sleep(2500);
+    {
+      const sx = await statusNu();
+      const lg = (sx.logs || {}).btechnics || [];
+      ok("Rollen 1.50: rolwijziging in HA gelogd met melding", lg.some((e) => /rol van Arne Test: Medewerker → Superadmin \(in HA\)/.test(e.message)) && (sx.logs.notifications || []).some((n) => /rollen/i.test(n.title || "")), JSON.stringify({ lg: lg.slice(-4), n: (sx.logs.notifications || []).map((n) => n.title) }));
+    }
+    U = await batch([{ id: "rol21", type: "set_role", user_id: arne.id, role: "medewerker" }]);
+    // v1.50.0: Alleen beheerders vanuit Work
+    const nd = await ws({ type: "lovelace/dashboards/create", url_path: "dash-test", title: "Test Dash", require_admin: true, mode: "storage", show_in_sidebar: true }).catch((e) => ({ error: String(e && e.message || e) }));
+    await sleep(1000);
+    const sysDef = (await ws({ type: "get_panels" })).home ? "home" : null;  // standaard van HA: systemData.default_panel || "home"
+    U = await batch([
+      { id: "rol22", type: "set_require_admin", url_path: "dash-test", require_admin: false },
+      { id: "rol23", type: "set_require_admin", url_path: "energy", require_admin: true },
+      { id: "rol35", type: "set_require_admin", url_path: "logbook", require_admin: true },
+      { id: "rol24", type: "set_require_admin", url_path: "bestaatniet", require_admin: false },
+      { id: "rol25", type: "set_require_admin", url_path: "dash-test", require_admin: "nee" },
+      ...(sysDef ? [{ id: "rol33", type: "set_require_admin", url_path: sysDef, require_admin: true }] : []),
+    ]);
+    await sleep(1000);
+    {
+      const lijst = await ws({ type: "lovelace/dashboards/list" });
+      const d = lijst.find((x) => x.url_path === "dash-test");
+      const pn0 = ((await statusNu()).rollen || {}).panels || [];
+      const pn = pn0.find((p) => p.url_path === "dash-test"), plb = pn0.find((p) => p.url_path === "energy");
+      const wp = await ws({ type: "get_panels" });
+      ok("Rollen 1.50: Alleen beheerders uitzetten vanuit Work (dashboard uit de UI)", !nd.error && U.rol22 && U.rol22.ok && U.rol22.result.require_admin === false && d && d.require_admin === false && pn && pn.require_admin === false && pn.bewerkbaar === true, JSON.stringify({ nd, rol22: U.rol22, d, pn }));
+      ok("Rollen 1.50: Alleen beheerders voor een standaardpaneel (zoals HA)", U.rol23 && U.rol23.ok && plb && plb.require_admin === true && plb.bewerkbaar === true && wp.energy && wp.energy.require_admin === true, JSON.stringify({ rol23: U.rol23, plb, wp: wp.energy && wp.energy.require_admin }));
+      const plog = pn0.find((p) => p.url_path === "logbook");
+      ok("Rollen 1.50: Alleen beheerders geweigerd waar HA het niet toelaat", U.rol35 && !U.rol35.ok && /enkel in HA zelf/.test(U.rol35.error) && plog && plog.bewerkbaar === false, JSON.stringify({ rol35: U.rol35, plog }));
+      ok("Rollen 1.50: Alleen beheerders weigert onbekend, geen ja/nee en standaard van HA", U.rol24 && !U.rol24.ok && /bestaat niet/.test(U.rol24.error) && U.rol25 && !U.rol25.ok && /true of false/.test(U.rol25.error) && (!sysDef || (U.rol33 && !U.rol33.ok && /standaarddashboard van HA/.test(U.rol33.error))), JSON.stringify([U.rol24, U.rol25, U.rol33, sysDef]));
+    }
+    U = await batch([{ id: "rol34", type: "set_require_admin", url_path: "energy", require_admin: false }]);
+    // v1.50.0 (review): titel die in HA zelf gewijzigd is, wint
+    await ws({ type: "frontend/update_panel", url_path: "history", title: "Historiek" });
+    await sleep(500);
+    {
+      const ph = (((await statusNu()).rollen || {}).panels || []).find((p) => p.url_path === "history");
+      ok("Rollen 1.50: eigen titel uit HA wint", U.rol34 && U.rol34.ok && ph && ph.title === "Historiek", JSON.stringify({ rol34: U.rol34, ph }));
+    }
+    await ws({ type: "frontend/update_panel", url_path: "history", title: null });
+    // v1.50.0: standaarddashboard per rol (dashboards nu: map enkel admin)
+    U = await batch([
+      { id: "rol26", type: "set_standaard", standaard: { medewerker: "map" } },
+      { id: "rol27", type: "set_standaard", standaard: { medewerker: "logbook", gebruiker: "history" } },
+    ]);
+    await sleep(1500);
+    ok("Rollen 1.50: standaard dat de rol niet ziet geweigerd", U.rol26 && !U.rol26.ok && /zichtbaar/.test(U.rol26.error), JSON.stringify(U.rol26));
+    ok("Rollen 1.50: standaarddashboard per rol gezet", U.rol27 && U.rol27.ok && core(arne.id).default_panel === "logbook" && core(eigenaar.id).default_panel === undefined && (((await statusNu()).rollen || {}).standaard || {}).medewerker === "logbook", JSON.stringify({ rol27: U.rol27, arne: core(arne.id), eig: core(eigenaar.id) }));
+    U = await batch([
+      { id: "rol28", type: "set_dashboards", dashboards: { map: ["admin"], logbook: ["admin"] } },
+      { id: "rol29", type: "set_require_admin", url_path: "dash-test", require_admin: true },
+    ]);
+    ok("Rollen 1.50: standaard verbergen geweigerd", U.rol28 && !U.rol28.ok && /standaarddashboard/.test(U.rol28.error) && U.rol29 && U.rol29.ok, JSON.stringify([U.rol28, U.rol29]));
+    // gebruiker kiest zelf iets anders: blijft staan zolang rol en instelling gelijk blijven
+    const tArne2 = await tokenVoor("arne.test", arne.password);
+    const eigen = tArne2 ? await wsAls(tArne2, { type: "frontend/set_user_data", key: "core", value: { ...core(arne.id), default_panel: "map" } }) : null;
+    U = await batch([{ id: "rol30", type: "set_dashboards", dashboards: { map: ["admin"] } }]);
+    await sleep(1500);
+    const naEigen = core(arne.id).default_panel;
+    U = await batch([{ id: "rol31", type: "set_role", user_id: arne.id, role: "gebruiker" }]);
+    await sleep(1500);
+    const naRol = core(arne.id).default_panel;
+    U = await batch([{ id: "rol32", type: "set_standaard", standaard: {} }]);
+    await sleep(1500);
+    const naLeeg = core(arne.id);
+    ok("Rollen 1.50: eigen keuze blijft, rolwijziging zet de standaard, leeg haalt ze weg", eigen && eigen.success && naEigen === "map" && naRol === "history" && U.rol32 && U.rol32.ok && naLeeg.default_panel === undefined, JSON.stringify({ eigen, naEigen, naRol, naLeeg }));
+    await ws({ type: "lovelace/dashboards/delete", dashboard_id: (await ws({ type: "lovelace/dashboards/list" })).find((x) => x.url_path === "dash-test").id }).catch(() => null);
     U = await batch([
       { id: "rol13", type: "delete_user", user_id: ine.id },
       { id: "rol14", type: "delete_user", user_id: arne.id },

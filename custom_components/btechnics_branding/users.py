@@ -8,6 +8,9 @@ Overzicht van de gebruikers gaat mee in de status. Opdrachten (via remote.py):
 - delete_user    gebruiker verwijderen
 - set_role       rol kiezen: superadmin, admin, medewerker of gebruiker (v1.49.0, roles.py)
   create_user kan ook meteen een rol krijgen ("role").
+- set_dashboards zichtbaarheid van dashboards per rol (v1.49.0)
+- set_standaard  standaarddashboard per rol (v1.50.0)
+- set_require_admin  "Alleen beheerders" van een dashboard aan of uit (v1.50.0)
 
 Veiligheidsregels, altijd:
 - systeemgebruikers (Supervisor, add-ons) worden nooit getoond of aangepast;
@@ -146,6 +149,19 @@ async def _admins_left(hass: HomeAssistant, without) -> int:
 
 
 async def async_execute(hass: HomeAssistant, kind: str, cmd: dict) -> dict[str, Any]:
+    from . import roles
+    # v1.50.0: rolwijzigingen uit deze opdracht staan in het logboek als "via Work"
+    token = roles.BRON.set("Work")
+    uid = cmd.get("user_id")
+    roles.work_begin(hass, uid)
+    try:
+        return await _execute(hass, kind, cmd)
+    finally:
+        roles.work_end(hass, uid)
+        roles.BRON.reset(token)
+
+
+async def _execute(hass: HomeAssistant, kind: str, cmd: dict) -> dict[str, Any]:
     from homeassistant.auth.providers import homeassistant as auth_ha
 
     provider = auth_ha.async_get_provider(hass)
@@ -172,28 +188,31 @@ async def async_execute(hass: HomeAssistant, kind: str, cmd: dict) -> dict[str, 
         user = await hass.auth.async_create_user(
             name, group_ids=[GROUP_ID_ADMIN if admin else GROUP_ID_USER], local_only=local_only,
         )
-        added = False
-        try:
-            await provider.async_add_auth(username, password)
-            added = True
-            creds = await provider.async_get_or_create_credentials({"username": username})
-            await hass.auth.async_link_user(user, creds)
-            from . import roles
-            if role in roles.STORED:
-                await roles.async_store_role(hass, user.id, role)
-        except Exception:
-            if added:
-                try:
-                    await provider.async_remove_auth(username)
-                except Exception:  # noqa: BLE001
-                    pass
-            await hass.auth.async_remove_user(user)
-            raise
         from . import roles
+        roles.work_begin(hass, user.id)  # v1.50.0: rol-logregel als "via Work"
         try:
-            await roles.async_apply_sidebar(hass, user)
-        except Exception:  # noqa: BLE001
-            pass  # de zijbalk volgt bij het volgende event of de volgende start
+            added = False
+            try:
+                await provider.async_add_auth(username, password)
+                added = True
+                creds = await provider.async_get_or_create_credentials({"username": username})
+                await hass.auth.async_link_user(user, creds)
+                if role in roles.STORED:
+                    await roles.async_store_role(hass, user.id, role)
+            except Exception:
+                if added:
+                    try:
+                        await provider.async_remove_auth(username)
+                    except Exception:  # noqa: BLE001
+                        pass
+                await hass.auth.async_remove_user(user)
+                raise
+            try:
+                await roles.async_apply_sidebar(hass, user)
+            except Exception:  # noqa: BLE001
+                pass  # de zijbalk volgt bij het volgende event of de volgende start
+        finally:
+            roles.work_end(hass, user.id)
         out = _out(hass, user)
         if generated:
             out["password"] = password  # eenmalig, enkel in het resultaat
@@ -317,8 +336,17 @@ async def async_execute(hass: HomeAssistant, kind: str, cmd: dict) -> dict[str, 
         out = await roles.async_set_dashboards(hass, cmd.get("dashboards"))
         return {**out, "name": "dashboards per rol"}
 
+    if kind == "set_standaard":
+        from . import roles
+        out = await roles.async_set_standaard(hass, cmd.get("standaard"))
+        return {**out, "name": "standaarddashboard per rol"}
+
+    if kind == "set_require_admin":
+        from . import roles
+        return await roles.async_set_require_admin(hass, cmd.get("url_path"), cmd.get("require_admin"))
+
     raise ValueError(f"onbekende opdracht: {kind}")
 
 
 KINDS = ("create_user", "update_user", "set_password", "logout_user", "delete_user",
-         "set_role", "set_dashboards")
+         "set_role", "set_dashboards", "set_standaard", "set_require_admin")
