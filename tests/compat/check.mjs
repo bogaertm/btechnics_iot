@@ -547,13 +547,13 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   // v1.33.1: https verplicht (behalve lokaal adres)
   const fout = await setOpts({ ...ALLES, status_url: "http://work.btechnics.be/api/iot/status", status_token: "testsleutel" });
   ok("Status: http naar buiten geweigerd", fout.f.type === "form" && fout.f.errors && fout.f.errors.status_url === "status_url_https", JSON.stringify(fout.f.errors));
-  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.50.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
+  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.50.1" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
   {
     const sw = b.software || [];
     const own = sw.find((x) => x.kind === "custom" && x.domain === "btechnics_branding");
     const hacs = sw.find((x) => x.entity_id === "update.test_hacs_integratie");
     const fw = sw.find((x) => x.entity_id === "update.test_faalt");
-    ok("Status: softwarelijst met alle versies (v1.45.0)", !!own && own.installed === "1.50.0" && !!hacs && hacs.kind === "hacs" && hacs.installed === "v1.0.0" && hacs.up_to_date === true && !!fw && fw.up_to_date === false && fw.latest === "2.0.0", JSON.stringify(sw.map((x) => `${x.kind}:${x.name}=${x.installed}${x.up_to_date === false ? "->" + x.latest : ""}`)));
+    ok("Status: softwarelijst met alle versies (v1.45.0)", !!own && own.installed === "1.50.1" && !!hacs && hacs.kind === "hacs" && hacs.installed === "v1.0.0" && hacs.up_to_date === true && !!fw && fw.up_to_date === false && fw.latest === "2.0.0", JSON.stringify(sw.map((x) => `${x.kind}:${x.name}=${x.installed}${x.up_to_date === false ? "->" + x.latest : ""}`)));
   }
   ok("Status: geen sleutel in het bericht", !JSON.stringify(b).includes("testsleutel"));
   {
@@ -935,6 +935,26 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
       ok("Rollen 1.50: eigen titel uit HA wint", U.rol34 && U.rol34.ok && ph && ph.title === "Historiek", JSON.stringify({ rol34: U.rol34, ph }));
     }
     await ws({ type: "frontend/update_panel", url_path: "history", title: null });
+    // v1.50.1: een in HA verborgen paneel (show_in_sidebar false) blijft beheerbaar in set_dashboards
+    await ws({ type: "frontend/update_panel", url_path: "history", show_in_sidebar: false });
+    await ws({ type: "lovelace/dashboards/create", url_path: "dash-weg", title: "Weg Dash", mode: "storage" }).catch(() => null);
+    await sleep(800);
+    U = await batch([{ id: "rol36", type: "set_dashboards", dashboards: { map: ["admin"], history: ["admin"], "dash-weg": ["admin"] } }]);
+    {
+      const pn = ((await statusNu()).rollen || {}).panels || [];
+      const ph = pn.find((p) => p.url_path === "history"), pm = pn.find((p) => p.url_path === "map");
+      ok("Rollen 1.50.1: verborgen paneel aanvaard en met in_zijbalk false in panels", U.rol36 && U.rol36.ok && (U.rol36.result.dashboards || {}).history && ph && ph.in_zijbalk === false && pm && pm.in_zijbalk === true, JSON.stringify({ rol36: U.rol36, ph, pm }));
+    }
+    const dw = (await ws({ type: "lovelace/dashboards/list" })).find((x) => x.url_path === "dash-weg");
+    if (dw) await ws({ type: "lovelace/dashboards/delete", dashboard_id: dw.id }).catch(() => null);
+    await sleep(800);
+    U = await batch([
+      { id: "rol38", type: "set_dashboards", dashboards: { map: ["admin"], history: ["admin"], "dash-weg": ["admin"] } },
+      { id: "rol39", type: "set_dashboards", dashboards: { map: ["admin"], "dash-nooit": ["admin"] } },
+    ]);
+    ok("Rollen 1.50.1: verwijderd maar beheerd dashboard blokkeert de volledige keuze niet", !!dw && U.rol38 && U.rol38.ok && U.rol39 && !U.rol39.ok && /bestaat niet/.test(U.rol39.error), JSON.stringify({ dw: !!dw, rol38: U.rol38, rol39: U.rol39 }));
+    await ws({ type: "frontend/update_panel", url_path: "history", show_in_sidebar: null });
+    U = await batch([{ id: "rol37", type: "set_dashboards", dashboards: { map: ["admin"] } }]);
     // v1.50.0: standaarddashboard per rol (dashboards nu: map enkel admin)
     U = await batch([
       { id: "rol26", type: "set_standaard", standaard: { medewerker: "map" } },

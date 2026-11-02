@@ -301,17 +301,44 @@ def _editable(hass: HomeAssistant, url_path: str, storage: dict | None = None) -
     return url_path in _EDITABLE_BUILTIN or url_path in (storage if storage is not None else _storage_dashboards(hass))
 
 
+_NOT_MANAGED = ("config", "developer-tools", "profile", "notfound")
+
+
+def _all_panels(hass: HomeAssistant) -> dict[str, dict[str, Any]]:
+    """v1.50.1: alle bestaande panelen met een titel, ook die in HA verborgen zijn in de
+    zijbalk (paneelinstelling show_in_sidebar false). Voor de controle in set_dashboards:
+    Work stuurt de volledige keuze uit de status mee, ook voor een paneel dat intussen
+    verborgen is (energy op Trefpunt, 2/11)."""
+    out: dict[str, dict[str, Any]] = {}
+    for url_path, p in (hass.data.get("frontend_panels") or {}).items():
+        if not getattr(p, "sidebar_title", None) or url_path in _NOT_MANAGED:
+            continue
+        info = _panel_info(hass, url_path, p)
+        info.pop("show", None)
+        out[url_path] = info
+    return out
+
+
 def panels(hass: HomeAssistant) -> list[dict[str, Any]]:
-    """Dashboards en andere panelen in de zijbalk, voor de keuze in de Work-app."""
+    """Dashboards en andere panelen in de zijbalk, voor de keuze in de Work-app.
+
+    v1.50.1 (review): ook een paneel dat in HA verborgen is (paneelinstelling
+    show_in_sidebar false), zodra het in de beheerde keuze of als standaard staat. Zo
+    kan Work het blijven tonen en meesturen. Veld in_zijbalk zegt of HA het toont."""
+    data = hass.data.get(KEY) or {}
+    ref = set((data.get("dashboards") or {}).keys()) | set((data.get("standaard") or {}).values())
+    storage = _storage_dashboards(hass)
     out = []
     for url_path, p in (hass.data.get("frontend_panels") or {}).items():
         # Zonder titel toont HA een paneel nooit in de zijbalk (notfound, _my_redirect)
-        if not getattr(p, "sidebar_title", None) or url_path in ("config", "developer-tools", "profile"):
+        if not getattr(p, "sidebar_title", None) or url_path in _NOT_MANAGED:
             continue
         info = _panel_info(hass, url_path, p)
-        if not info.pop("show"):
+        shown = info.pop("show")
+        if not shown and url_path not in ref:
             continue
-        info["bewerkbaar"] = _editable(hass, url_path)  # v1.50.0: Alleen beheerders vanuit Work
+        info["bewerkbaar"] = _editable(hass, url_path, storage)  # v1.50.0: Alleen beheerders vanuit Work
+        info["in_zijbalk"] = shown  # v1.50.1
         out.append(info)
     return sorted(out, key=lambda x: x["title"].lower())
 
@@ -322,30 +349,34 @@ def _check_standaard(standaard: dict, dashboards: dict, info: dict[str, dict], v
     intussen verwijderd of afgeschermd dashboard de rest niet blokkeert (review 1.50.0)."""
     for r, path in standaard.items():
         p = info.get(path)
-        if p is None:
-            if volledig:
-                raise ValueError(f"dashboard {str(path)[:60]} bestaat niet")
-            continue
-        if volledig and p["require_admin"]:
+        if p is None and volledig:
+            raise ValueError(f"dashboard {str(path)[:60]} bestaat niet")
+        if p is not None and volledig and p["require_admin"]:
             raise ValueError(f"{p['title']} staat op Alleen beheerders en kan geen standaard zijn voor {LABEL[r]}")
+        # v1.50.1 (review 2): altijd, ook als het paneel er even niet is (kort na een herstart)
         if path in dashboards and r not in dashboards[path]:
-            raise ValueError(f"{p['title']} is het standaarddashboard van {LABEL[r]} en moet voor die rol zichtbaar blijven")
+            title = p["title"] if p is not None else str(path)[:60]
+            raise ValueError(f"{title} is het standaarddashboard van {LABEL[r]} en moet voor die rol zichtbaar blijven")
 
 
 async def async_set_dashboards(hass: HomeAssistant, mapping: Any) -> dict:
     """Vervang de volledige keuze: {url_path: [rollen die het zien]}. Leeg = niets beheren."""
     if not isinstance(mapping, dict):
         raise ValueError("dashboards moet een object zijn: {url_path: [rollen]}")
-    info = {p["url_path"]: p for p in panels(hass)}
-    clean: dict[str, list[str]] = {}
     for url_path, rs in mapping.items():
-        if url_path not in info:
-            raise ValueError(f"dashboard {str(url_path)[:60]} bestaat niet")
         if not isinstance(rs, list) or any(r not in DASH_ROLES for r in rs):
-            raise ValueError(f"rollen voor {url_path}: lijst met {', '.join(DASH_ROLES)}")
-        clean[url_path] = sorted(set(rs))
+            raise ValueError(f"rollen voor {str(url_path)[:60]}: lijst met {', '.join(DASH_ROLES)}")
     async with _lock(hass):
         data = dict(await async_load(hass))
+        info = _all_panels(hass)  # v1.50.1: ook in HA verborgen panelen
+        known = data.get("dashboards") or {}
+        clean: dict[str, list[str]] = {}
+        for url_path, rs in mapping.items():
+            # v1.50.1 (review): een sleutel die al beheerd werd, blijft aanvaard, ook als het
+            # paneel intussen weg is (verwijderd, of nog niet geladen kort na een herstart)
+            if url_path not in info and url_path not in known:
+                raise ValueError(f"dashboard {str(url_path)[:60]} bestaat niet")
+            clean[url_path] = sorted(set(rs))
         _check_standaard(data.get("standaard") or {}, clean, info, volledig=False)  # v1.50.0
         data["dashboards"] = clean
         await _async_save(hass, data)
@@ -367,9 +398,14 @@ async def async_set_standaard(hass: HomeAssistant, mapping: Any) -> dict:
             raise ValueError(f"standaard voor {r}: url_path als tekst")
         clean[r] = path
     async with _lock(hass):
-        info = {p["url_path"]: p for p in panels(hass)}
+        info = _all_panels(hass)  # v1.50.1: ook in HA verborgen panelen (bv. home)
         data = dict(await async_load(hass))
-        _check_standaard(clean, data.get("dashboards") or {}, info)
+        dash = data.get("dashboards") or {}
+        oud = data.get("standaard") or {}
+        # v1.50.1 (review): volledige controle enkel voor rollen die wijzigen; een
+        # ongewijzigde standaard die intussen in HA veranderde, blokkeert de rest niet
+        _check_standaard({r: p for r, p in clean.items() if oud.get(r) != p}, dash, info)
+        _check_standaard({r: p for r, p in clean.items() if oud.get(r) == p}, dash, info, volledig=False)
         data["standaard"] = clean
         await _async_save(hass, data)
     await async_apply_sidebars(hass)
@@ -407,7 +443,7 @@ async def async_set_require_admin(hass: HomeAssistant, url_path: Any, value: Any
     if not isinstance(url_path, str) or not url_path:
         raise ValueError("url_path ontbreekt")
     raw = (hass.data.get("frontend_panels") or {}).get(url_path)
-    if raw is None or url_path in ("config", "developer-tools", "profile", "notfound"):
+    if raw is None or url_path in _NOT_MANAGED:
         raise ValueError(f"dashboard {url_path[:60]} bestaat niet")
     title = _panel_info(hass, url_path, raw)["title"]
     storage = _storage_dashboards(hass)
