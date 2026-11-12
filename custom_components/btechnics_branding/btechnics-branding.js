@@ -34,10 +34,15 @@
  *          onderschept (zie __init__.py).
  */
 const BRAND = "Btechnics IOT";
+// v1.51.0: bovenaan, want BT gebruikt de versie in de adressen. Iconen en logo staan
+// 31 dagen in de cache (cache_headers van HA); een nieuwe versie geeft een nieuw adres.
+const BT_VERSION = "1.51.0";
 
 const BT = {
-  logo: "/btechnics_branding/logo.svg",
-  icon: "/btechnics_branding/app-icon-192.png",
+  logo: "/btechnics_branding/logo.svg?v=" + BT_VERSION,
+  logoLight: "/btechnics_branding/logo-light.svg?v=" + BT_VERSION,
+  logoDark: "/btechnics_branding/logo-dark.svg?v=" + BT_VERSION,
+  icon: "/btechnics_branding/app-icon-192.png?v=" + BT_VERSION,
   loginText: BRAND,
   loginSize: 24,
   sidebarText: BRAND,
@@ -245,9 +250,12 @@ function patchSidebar() {
   if (!logo) {
     logo = document.createElement("img");
     logo.className = "bt-sidebar-logo";
-    logo.src = BT.logo;
     logo.alt = "";
   }
+  // v1.51.0: witte letters op een donkere zijbalk (thema van HA, niet enkel het systeem)
+  // Vaste bestanden: logo.svg schakelt op het systeem, de zijbalk volgt het thema van HA.
+  const logoSrc = isDarkMode() ? BT.logoDark : BT.logoLight;
+  if (logo.getAttribute("src") !== logoSrc) logo.src = logoSrc;
   logo.style.cssText = "height:" + LOGO_H + "px;width:auto;max-width:60%;object-fit:contain;" +
     "object-position:left center;display:block;flex-shrink:1;min-width:0;";
   if (logo.parentNode !== rij) rij.appendChild(logo);
@@ -390,6 +398,9 @@ const BT_COLORS = {
 
 function isDarkMode() {
   try {
+    // v1.51.0: eerst wat HA zelf gebruikt
+    const dm = document.querySelector("home-assistant")?.hass?.themes?.darkMode;
+    if (typeof dm === "boolean") return dm;
     const bg = getComputedStyle(document.documentElement)
       .getPropertyValue("--primary-background-color").trim();
     const m = bg.match(/^#([0-9a-f]{6})$/i);
@@ -453,7 +464,14 @@ function patchTitle() {
 }
 
 function patchFavicon() {
-  document.querySelectorAll('link[rel*="icon"]').forEach(l => l.remove());
+  // v1.51.0: rel~="icon" (exact woord). rel*="icon" raakte ook apple-touch-icon, en
+  // zonder die link kiest iPhone bij "Zet op beginscherm" geen of een verkeerd icoon.
+  let mine = false;
+  document.querySelectorAll('link[rel~="icon"]').forEach(l => {
+    if (!mine && (l.getAttribute("href") || "") === BT.icon) { mine = true; return; }
+    l.remove();
+  });
+  if (mine) return;
   const link = document.createElement("link");
   link.rel = "icon"; link.type = "image/png"; link.href = BT.icon;
   document.head.appendChild(link);
@@ -675,7 +693,6 @@ function patchAllInner() {
 // Wat voor onze vervanging in die cache belandde, bleef het HA huisje tonen,
 // ook al geeft de server nu het Btechnics logo. Eenmaal per versie halen we die
 // items uit alle caches; de service worker haalt ze dan opnieuw bij de server.
-const BT_VERSION = "1.50.1";
 const HA_CACHED_RE = new RegExp(
   "/static/(icons/(favicon|mask-icon|apple-touch-icon|maskable_icon|tile-win|logo_ohf|ohf)" +
   "|images/(home-assistant-logo|notification-badge|ohf-badge|open-home-foundation))" +
@@ -742,6 +759,10 @@ async function disableSurvey() {
   patchFavicon();
   new MutationObserver(schedulePatch)
     .observe(document.documentElement, { childList: true, subtree: true, characterData: true });
+  // v1.51.0: themawissel (licht/donker) meteen volgen voor het logo in de zijbalk
+  new MutationObserver(schedulePatch)
+    .observe(document.documentElement, { attributes: true, attributeFilter: ["style", "class"] });
+  try { window.matchMedia("(prefers-color-scheme: dark)").addEventListener("change", schedulePatch); } catch(e) {}
   const start = () => { patchAll(); setInterval(patchAll, 2000); };
   if (document.readyState === "complete") start();
   else window.addEventListener("load", start, { once: true });

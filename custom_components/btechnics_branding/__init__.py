@@ -136,17 +136,35 @@ _ICON_512_URL = "/btechnics_branding/app-icon-512.png"
 _ICON_192_FILE = str(_DIR / "app-icon-192.png")
 _ICON_192_URL = "/btechnics_branding/app-icon-192.png"
 
+# v1.51.0: nieuw app-icoon (petrol tegel, witte band IOT). Maskable apart, en voor
+# iOS een vierkant icoon zonder transparantie (iOS vult transparantie zwart in).
+_ICON_MASK_512_FILE = str(_DIR / "app-icon-maskable-512.png")
+_ICON_MASK_512_URL = "/btechnics_branding/app-icon-maskable-512.png"
+_ICON_MASK_192_FILE = str(_DIR / "app-icon-maskable-192.png")
+_ICON_MASK_192_URL = "/btechnics_branding/app-icon-maskable-192.png"
+_ICON_APPLE_FILE = str(_DIR / "app-icon-apple-180.png")
+_ICON_APPLE_URL = "/btechnics_branding/app-icon-apple-180.png"
+_ICON_SVG_FILE = str(_DIR / "app-icon.svg")
+_ICON_SVG_URL = "/btechnics_branding/app-icon.svg"
+_LOGO_LIGHT_SVG_FILE = str(_DIR / "logo-light.svg")
+_LOGO_LIGHT_SVG_URL = "/btechnics_branding/logo-light.svg"
+_LOGO_DARK_SVG_FILE = str(_DIR / "logo-dark.svg")
+_LOGO_DARK_SVG_URL = "/btechnics_branding/logo-dark.svg"
+
 _LOGO_SVG_FILE = str(_DIR / "logo.svg")
 _LOGO_SVG_URL = "/btechnics_branding/logo.svg"
 _FAVICON_ICO_FILE = str(_DIR / "favicon.ico")
 _FAVICON_ICO_URL = "/btechnics_branding/favicon.ico"
-_ICON_PNG_RE = re.compile(r"/static/icons/(?:favicon-(?:\d+x\d+|apple-\d+x\d+)|maskable_icon-\d+x\d+)\.png")
+_APPLE_PNG_RE = re.compile(r"/static/icons/favicon-apple-\d+x\d+\.png")
+_MASK_SVG_HA = "/static/icons/mask-icon.svg"
+_MASK_LINK_RE = re.compile(r'<link[^>]*rel="mask-icon"[^>]*>\s*')
+_ICON_PNG_RE = re.compile(r"/static/icons/(?:favicon-\d+x\d+|maskable_icon-\d+x\d+)\.png")
 _BRAND_LOGO_FILE = str(_DIR / "brand" / "logo.png")
 _BRAND_DARK_LOGO_FILE = str(_DIR / "brand" / "dark_logo.png")
 
 _API_URL = "/api/btechnics_branding/config"
 _LAUNCH_LOGO_HA = "/static/images/home-assistant-logo-loading.svg"
-_BT_PETROL = "#00222b"
+_BT_PETROL = "#04212b"  # v1.51.0: kleur van de tegel van het app-icoon
 _HA_THEME_COLOR = "#2980b9"
 _HTML_REPLACE = (
     ("<title>Home Assistant</title>", "<title>Btechnics IOT</title>"),
@@ -338,7 +356,7 @@ def _patch_response(response, request_path: str, file_text: str | None = None):
     inject = _TR_SCRIPT + _HIDE_CSS + (_EXT_SCRIPT if is_auth else "")
     patched = text.replace("<head>", "<head>" + inject, 1)
     # Opstartscherm: HA logo meteen in de HTML vervangen (geen flits voor de JS er is)
-    patched = patched.replace(_LAUNCH_LOGO_HA, _LOGO_SVG_URL)
+    patched = patched.replace(_LAUNCH_LOGO_HA, f"{_LOGO_SVG_URL}?v={_BT_VERSION}")
     # v1.29.1: naam en kleuren die al in de HTML staan, voor de JS geladen is.
     # apple-mobile-web-app-title is de naam onder het icoon bij "Zet op
     # beginscherm" op iPhone; application-name idem op Android/Windows.
@@ -348,6 +366,10 @@ def _patch_response(response, request_path: str, file_text: str | None = None):
     # die de site al eens opende voor de branding er was, bewaart het HA-icoon onder
     # het oude adres (1 dag, iOS het "site-icoon" nog langer) en toonde dat verder,
     # ook op het aanmeldscherm. Een nieuw adres wordt altijd opnieuw opgehaald.
+    patched = _APPLE_PNG_RE.sub(f"{_ICON_APPLE_URL}?v={_BT_VERSION}", patched)
+    # Safari kleurt een mask-icon effen in: van een gevulde tegel blijft een oranje
+    # rechthoek over. Weg ermee, Safari neemt dan het gewone icoon.
+    patched = _MASK_LINK_RE.sub("", patched)
     patched = _ICON_PNG_RE.sub(f"{_ICON_192_URL}?v={_BT_VERSION}", patched)
     patched = patched.replace('"/static/icons/favicon.ico"', f'"{_FAVICON_ICO_URL}?v={_BT_VERSION}"')
     _LOGGER.debug("BT: HTML gepatcht voor %s (auth=%s)", request_path, is_auth)
@@ -389,20 +411,17 @@ def _make_manifest_handler(original):
                 m["short_name"] = "Btechnics IOT"
                 if str(m.get("theme_color", "")).lower() == _HA_THEME_COLOR:
                     m["theme_color"] = _BT_PETROL
+                # v1.51.0: "any" (afgeronde tegel) en "maskable" (volle tegel, Android
+                # knipt zelf) apart, zoals de spec het wil. ?v= omdat de iconen 31 dagen
+                # in de cache staan: een nieuwe versie geeft een nieuw adres.
+                v = f"?v={_BT_VERSION}"
                 m["icons"] = [
-                    {
-                        "src": _ICON_192_URL,
-                        "sizes": "192x192",
-                        "type": "image/png",
-                        "purpose": "any maskable",
-                    },
-                    {
-                        "src": _ICON_512_URL,
-                        "sizes": "512x512",
-                        "type": "image/png",
-                        "purpose": "any maskable",
-                    },
+                    {"src": _ICON_192_URL + v, "sizes": "192x192", "type": "image/png", "purpose": "any"},
+                    {"src": _ICON_512_URL + v, "sizes": "512x512", "type": "image/png", "purpose": "any"},
+                    {"src": _ICON_MASK_192_URL + v, "sizes": "192x192", "type": "image/png", "purpose": "maskable"},
+                    {"src": _ICON_MASK_512_URL + v, "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
                 ]
+                m["background_color"] = _BT_PETROL
                 return web.Response(
                     text=json.dumps(m), status=200,
                     content_type="application/manifest+json",
@@ -487,8 +506,14 @@ def _static_override(path: str):
         return "BLANK", "image/svg+xml"
     if path.endswith(".ico"):
         return _FAVICON_ICO_FILE, "image/x-icon"
+    if path.endswith("mask-icon.svg"):
+        return _ICON_SVG_FILE, "image/svg+xml"
     if path.endswith(".svg"):
         return _LOGO_SVG_FILE, "image/svg+xml"
+    if "apple" in path:
+        return _ICON_APPLE_FILE, "image/png"
+    if "maskable" in path:
+        return (_ICON_MASK_512_FILE if ("512" in path or "384" in path) else _ICON_MASK_192_FILE), "image/png"
     if "512" in path or "384" in path:
         return _ICON_512_FILE, "image/png"
     return _ICON_192_FILE, "image/png"
@@ -687,7 +712,7 @@ def _health(hass) -> dict:
 # combinatie van HA en Btechnics IOT meldt dat alles werkt, is die versie
 # bevestigd. Latere probleemmeldingen van een enkel scherm op een bevestigde
 # versie worden genegeerd (enkel gelogd). Na een update begint het opnieuw.
-_BT_VERSION = "1.50.1"
+_BT_VERSION = "1.51.0"
 _HEALTH_STORE = f"{DOMAIN}.health"
 
 
@@ -836,6 +861,12 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
             StaticPathConfig(_ICON_192_URL, _ICON_192_FILE, cache_headers=True),
             StaticPathConfig(_FAVICON_ICO_URL, _FAVICON_ICO_FILE, cache_headers=True),
             StaticPathConfig(_LOGO_SVG_URL, _LOGO_SVG_FILE, cache_headers=True),
+            StaticPathConfig(_LOGO_DARK_SVG_URL, _LOGO_DARK_SVG_FILE, cache_headers=True),
+            StaticPathConfig(_LOGO_LIGHT_SVG_URL, _LOGO_LIGHT_SVG_FILE, cache_headers=True),
+            StaticPathConfig(_ICON_MASK_192_URL, _ICON_MASK_192_FILE, cache_headers=True),
+            StaticPathConfig(_ICON_MASK_512_URL, _ICON_MASK_512_FILE, cache_headers=True),
+            StaticPathConfig(_ICON_APPLE_URL, _ICON_APPLE_FILE, cache_headers=True),
+            StaticPathConfig(_ICON_SVG_URL, _ICON_SVG_FILE, cache_headers=True),
         ])
     except Exception as err:
         _LOGGER.warning("Static path: %s", err)

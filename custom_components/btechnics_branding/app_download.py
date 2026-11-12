@@ -18,6 +18,12 @@ from homeassistant.components import frontend
 from homeassistant.components.http import HomeAssistantView
 from homeassistant.core import HomeAssistant
 
+
+def _version() -> str:
+    # v1.51.0: logo staat 31 dagen in de cache; nieuwe versie, nieuw adres
+    from . import _BT_VERSION
+    return _BT_VERSION
+
 # Vaste downloadlinks (altijd de laatste versie van de app)
 MAC_URL = "https://github.com/bogaertm/btechnics-iot-app/releases/latest/download/Btechnics-IOT-Mac.dmg"
 WINDOWS_URL = "https://github.com/bogaertm/btechnics-iot-app/releases/latest/download/Btechnics-IOT-Windows-Setup.exe"
@@ -50,7 +56,7 @@ a.btn svg{width:20px;height:20px;fill:currentColor}
 small{display:block;color:var(--muted);margin-top:18px;font-size:13px;line-height:1.5}
 </style></head>
 <body><main><div class="card">
-<img class="logo" src="/btechnics_branding/logo.svg" alt="Btechnics">
+<img class="logo" src="/btechnics_branding/logo.svg?v=__V__" alt="Btechnics IOT">
 <h1>Btechnics IOT op je computer</h1>
 <p>Met de desktop-app heb je je installatie altijd bij de hand op je Mac of Windows-pc. Je krijgt telkens de laatste versie.</p>
 <div class="buttons">
@@ -80,7 +86,7 @@ class AppDownloadView(HomeAssistantView):
     requires_auth = False
 
     async def get(self, request):
-        html = _PAGE.replace("__MAC__", MAC_URL).replace("__WIN__", WINDOWS_URL)
+        html = _PAGE.replace("__MAC__", MAC_URL).replace("__WIN__", WINDOWS_URL).replace("__V__", _version())
         return web.Response(
             text=html,
             content_type="text/html",
