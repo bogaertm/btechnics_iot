@@ -146,10 +146,7 @@ _ICON_APPLE_FILE = str(_DIR / "app-icon-apple-180.png")
 _ICON_APPLE_URL = "/btechnics_branding/app-icon-apple-180.png"
 _ICON_SVG_FILE = str(_DIR / "app-icon.svg")
 _ICON_SVG_URL = "/btechnics_branding/app-icon.svg"
-_LOGO_LIGHT_SVG_FILE = str(_DIR / "logo-light.svg")
-_LOGO_LIGHT_SVG_URL = "/btechnics_branding/logo-light.svg"
-_LOGO_DARK_SVG_FILE = str(_DIR / "logo-dark.svg")
-_LOGO_DARK_SVG_URL = "/btechnics_branding/logo-dark.svg"
+# v1.51.1: altijd het lichte logo, geen donkere versie (keuze Matthias).
 
 _LOGO_SVG_FILE = str(_DIR / "logo.svg")
 _LOGO_SVG_URL = "/btechnics_branding/logo.svg"
@@ -712,7 +709,7 @@ def _health(hass) -> dict:
 # combinatie van HA en Btechnics IOT meldt dat alles werkt, is die versie
 # bevestigd. Latere probleemmeldingen van een enkel scherm op een bevestigde
 # versie worden genegeerd (enkel gelogd). Na een update begint het opnieuw.
-_BT_VERSION = "1.51.0"
+_BT_VERSION = "1.51.1"
 _HEALTH_STORE = f"{DOMAIN}.health"
 
 
@@ -861,8 +858,6 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
             StaticPathConfig(_ICON_192_URL, _ICON_192_FILE, cache_headers=True),
             StaticPathConfig(_FAVICON_ICO_URL, _FAVICON_ICO_FILE, cache_headers=True),
             StaticPathConfig(_LOGO_SVG_URL, _LOGO_SVG_FILE, cache_headers=True),
-            StaticPathConfig(_LOGO_DARK_SVG_URL, _LOGO_DARK_SVG_FILE, cache_headers=True),
-            StaticPathConfig(_LOGO_LIGHT_SVG_URL, _LOGO_LIGHT_SVG_FILE, cache_headers=True),
             StaticPathConfig(_ICON_MASK_192_URL, _ICON_MASK_192_FILE, cache_headers=True),
             StaticPathConfig(_ICON_MASK_512_URL, _ICON_MASK_512_FILE, cache_headers=True),
             StaticPathConfig(_ICON_APPLE_URL, _ICON_APPLE_FILE, cache_headers=True),
