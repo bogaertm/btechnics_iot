@@ -36,7 +36,7 @@
 const BRAND = "Btechnics IOT";
 // v1.51.0: bovenaan, want BT gebruikt de versie in de adressen. Iconen en logo staan
 // 31 dagen in de cache (cache_headers van HA); een nieuwe versie geeft een nieuw adres.
-const BT_VERSION = "1.51.1";
+const BT_VERSION = "1.52.0";
 
 const BT = {
   logo: "/btechnics_branding/logo.svg?v=" + BT_VERSION,
@@ -404,7 +404,23 @@ function isDarkMode() {
   } catch(e) { return false; }
 }
 
+// v1.52.0: altijd licht. Koos iemand in zijn profiel "donker", dan zetten we dat terug
+// via HA's eigen event (themes-mixin "settheme"), dat de voorkeur ook bewaart.
+let btLightBusy = false;
+function forceLight() {
+  try {
+    const ha = document.querySelector("home-assistant");
+    const st = ha?.hass?.selectedTheme;
+    if (!btLightBusy && st && st.dark === true) {
+      btLightBusy = true;
+      ha.dispatchEvent(new CustomEvent("settheme", { detail: { dark: false }, bubbles: true, composed: true }));
+      setTimeout(() => { btLightBusy = false; }, 5000);
+    }
+  } catch(e) {}
+}
+
 function patchColors() {
+  forceLight();
   const root = document.documentElement;
   const dark = isDarkMode();
   const primary = dark ? BT_COLORS.scale["70"] : BT_COLORS.petrol;

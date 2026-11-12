@@ -196,6 +196,17 @@ _HIDE_CSS = (
     ".ohf-logo{display:none!important}"
     "</style>"
 )
+# v1.52.0: Btechnics IOT is altijd licht (keuze Matthias 13/11), ook op een toestel in
+# donkere modus. HA kiest donker via matchMedia("(prefers-color-scheme: dark)") (themes-mixin,
+# ha-authorize, launch screen) en via CSS media queries in de HTML. Dit script staat als eerste
+# in <head>, dus voor de modules van HA: elke vraag naar donker krijgt "niet".
+_LIGHT_SCRIPT = (
+    "<script>/*bt-licht*/(function(){try{var o=window.matchMedia.bind(window);"
+    "window.matchMedia=function(q){return o(/prefers-color-scheme\\s*:\\s*dark/i.test(String(q))?"
+    "'not all':q)};}catch(e){}})();</script>"
+)
+_DARK_MQ_RE = re.compile(r"\(\s*prefers-color-scheme\s*:\s*dark\s*\)")
+_COLOR_SCHEME_RE = re.compile(r'(<meta\s+name="color-scheme"\s+content=")[^"]*(")')
 _EXT_SCRIPT = '<script src="/btechnics_branding/btechnics-branding.js" type="module"></script>'
 
 # v1.34.0: WOORDKEUZE VOOR WONINGEN EN BEDRIJVEN.
@@ -351,7 +362,11 @@ def _patch_response(response, request_path: str, file_text: str | None = None):
 
     is_auth = "authorize" in request_path or "/auth/" in request_path
     inject = _TR_SCRIPT + _HIDE_CSS + (_EXT_SCRIPT if is_auth else "")
-    patched = text.replace("<head>", "<head>" + inject, 1)
+    patched = text.replace("<head>", "<head>" + _LIGHT_SCRIPT + inject, 1)
+    # v1.52.0: altijd licht. Donkere CSS-regels gelden nooit meer, en de browser
+    # tekent formulieren en schuifbalken licht.
+    patched = _DARK_MQ_RE.sub("not all", patched)
+    patched = _COLOR_SCHEME_RE.sub(r"\1light\2", patched)
     # Opstartscherm: HA logo meteen in de HTML vervangen (geen flits voor de JS er is)
     patched = patched.replace(_LAUNCH_LOGO_HA, f"{_LOGO_SVG_URL}?v={_BT_VERSION}")
     # v1.29.1: naam en kleuren die al in de HTML staan, voor de JS geladen is.
@@ -709,7 +724,7 @@ def _health(hass) -> dict:
 # combinatie van HA en Btechnics IOT meldt dat alles werkt, is die versie
 # bevestigd. Latere probleemmeldingen van een enkel scherm op een bevestigde
 # versie worden genegeerd (enkel gelogd). Na een update begint het opnieuw.
-_BT_VERSION = "1.51.1"
+_BT_VERSION = "1.52.0"
 _HEALTH_STORE = f"{DOMAIN}.health"
 
 

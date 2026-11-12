@@ -39,7 +39,6 @@ _PAGE = """<!doctype html>
 <title>IOT APP</title>
 <style>
 :root{--bg:#fafafa;--card:#fff;--text:#1d1a18;--muted:#6b6560;--line:#e8e3df;--orange:#ED6928;--gold:#F59E32}
-@media (prefers-color-scheme:dark){:root{--bg:#111;--card:#1c1c1c;--text:#eee;--muted:#a8a29e;--line:#2e2b29}}
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--text);font-family:Raleway,Roboto,system-ui,-apple-system,"Segoe UI",sans-serif}
 main{max-width:560px;margin:0 auto;padding:40px 16px}

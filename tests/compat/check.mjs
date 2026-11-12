@@ -69,12 +69,12 @@ const bytes = async (u) => Buffer.from(await (await fetch(BASE + u)).arrayBuffer
 const man = JSON.parse(await text("/manifest.json"));
 ok("Manifest: naam", man.name === "Btechnics IOT", man.name);
 ok("Manifest: iconen", (man.icons || []).every((i) => i.src.startsWith("/btechnics_branding/")));
-// v1.51.1: nieuw app-icoon, any en maskable apart, geversioneerd, petrol als thema
+// v1.52.0: nieuw app-icoon, any en maskable apart, geversioneerd, petrol als thema
 {
   const ic = man.icons || [];
   const any = ic.filter((i) => i.purpose === "any").map((i) => i.sizes).sort().join();
   const mask = ic.filter((i) => i.purpose === "maskable").map((i) => i.sizes).sort().join();
-  ok("Manifest 1.51: any en maskable 192 en 512", any === "192x192,512x512" && mask === "192x192,512x512" && ic.every((i) => /\?v=1\.51\.1$/.test(i.src)), JSON.stringify(ic));
+  ok("Manifest 1.51: any en maskable 192 en 512", any === "192x192,512x512" && mask === "192x192,512x512" && ic.every((i) => /\?v=1\.52\.0$/.test(i.src)), JSON.stringify(ic));
   const m512 = ic.find((i) => i.purpose === "maskable" && i.sizes === "512x512");
   ok("Manifest 1.51: maskable bestand klopt", !!m512 && (await bytes(m512.src)).equals(fs.readFileSync(path.join(COMP, "app-icon-maskable-512.png"))));
   ok("Manifest 1.51: themakleur petrol #04212b", String(man.theme_color).toLowerCase() === "#04212b" && String(man.background_color).toLowerCase() === "#04212b", man.theme_color + " " + man.background_color);
@@ -93,17 +93,24 @@ ok("Aanmeldscherm: script en titel", auth.includes("btechnics-branding.js") && a
 const icon = fs.readFileSync(path.join(COMP, "app-icon-192.png"));
 ok("Static favicon vervangen", (await bytes("/static/icons/favicon-192x192.png")).equals(icon));
 ok("Static maskable icoon vervangen", (await bytes("/static/icons/maskable_icon-192x192.png")).equals(fs.readFileSync(path.join(COMP, "app-icon-maskable-192.png"))));
-// v1.51.1: iPhone krijgt een vierkant icoon zonder transparantie
+// v1.52.0: iPhone krijgt een vierkant icoon zonder transparantie
 {
   const apple = fs.readFileSync(path.join(COMP, "app-icon-apple-180.png"));
   const link = (index.match(/rel="apple-touch-icon"[^>]*href="([^"]+)"|href="([^"]+)"[^>]*rel="apple-touch-icon"/) || []);
   const href = link[1] || link[2] || "";
-  ok("iPhone: apple-touch-icon is het iOS-icoon", /^\/btechnics_branding\/app-icon-apple-180\.png\?v=1\.51\.1$/.test(href) && (await bytes(href)).equals(apple), href);
+  ok("iPhone: apple-touch-icon is het iOS-icoon", /^\/btechnics_branding\/app-icon-apple-180\.png\?v=1\.52\.0$/.test(href) && (await bytes(href)).equals(apple), href);
   ok("iPhone: oud HA-adres geeft ook het iOS-icoon", (await bytes("/static/icons/favicon-apple-180x180.png")).equals(apple));
   ok("Safari: geen mask-icon meer in de HTML, oud adres geeft het app-icoon", !/rel="mask-icon"/.test(index) && (await bytes("/static/icons/mask-icon.svg")).equals(fs.readFileSync(path.join(COMP, "app-icon.svg"))));
   const lsvg = fs.readFileSync(path.join(COMP, "logo.svg"));
-  ok("v1.51.1: logo altijd licht, geen donkere versie", (await bytes("/btechnics_branding/logo.svg?v=1.51.1")).equals(lsvg) && !/prefers-color-scheme/.test(lsvg.toString()) && !fs.existsSync(path.join(COMP, "logo-dark.svg")) && fs.readFileSync(path.join(COMP, "brand/dark_logo.png")).equals(fs.readFileSync(path.join(COMP, "brand/logo.png"))));
+  ok("v1.52.0: logo altijd licht, geen donkere versie", (await bytes("/btechnics_branding/logo.svg?v=1.52.0")).equals(lsvg) && !/prefers-color-scheme/.test(lsvg.toString()) && !fs.existsSync(path.join(COMP, "logo-dark.svg")) && fs.readFileSync(path.join(COMP, "brand/dark_logo.png")).equals(fs.readFileSync(path.join(COMP, "brand/logo.png"))));
   ok("Index: theme-color petrol #04212b", /name="theme-color" content="#04212b"/i.test(index), (index.match(/name="theme-color"[^>]*/) || [""])[0]);
+}
+// v1.52.0: altijd licht, ook op een toestel in donkere modus
+for (const [naam, html] of [["index", index], ["aanmeldscherm", auth]]) {
+  const head = html.slice(html.indexOf("<head>"), html.indexOf("<head>") + 400);
+  ok("Altijd licht: " + naam + " zonder donkere CSS, color-scheme licht, script vooraan",
+    !/prefers-color-scheme\s*:\s*dark\s*\)/.test(html.replace(/\/\*bt-licht\*\/[\s\S]*?<\/script>/, "")) &&
+    !/name="color-scheme" content="[^"]*dark/.test(html) && /^<head><script>\/\*bt-licht\*\//.test(head), head.slice(0, 80));
 }
 // v1.40.0: geen HA-icoonadressen meer in de HTML (een browser kan die nog bewaard hebben)
 const authIcons = [...auth.matchAll(/(?:src|href)="([^"]*(?:icon|favicon)[^"]*)"/g)].map((m) => m[1]);
@@ -220,10 +227,33 @@ const ui = await page.evaluate(async () => {
 });
 ok("UI: titel", ui.title.includes("Btechnics IOT"), ui.title);
 ok("UI: logo in zijbalk", ui.sidebarLogo);
-// v1.51.1: de JS mag de apple-touch-icon niet weghalen; zijbalk volgt het thema
-ok("UI 1.51: apple-touch-icon blijft in de pagina", /^\/btechnics_branding\/app-icon-apple-180\.png\?v=1\.51\.1$/.test(ui.appleLink), ui.appleLink);
+// v1.52.0: de JS mag de apple-touch-icon niet weghalen; zijbalk volgt het thema
+ok("UI 1.51: apple-touch-icon blijft in de pagina", /^\/btechnics_branding\/app-icon-apple-180\.png\?v=1\.52\.0$/.test(ui.appleLink), ui.appleLink);
 ok("UI 1.51: favicon enkel het Btechnics icoon", ui.iconLinks.length >= 1 && ui.iconLinks.every((h) => /^\/btechnics_branding\//.test(h)), JSON.stringify(ui.iconLinks));
-ok("UI 1.51.1: logo zijbalk altijd licht", ui.sidebarLogoSrc === "/btechnics_branding/logo.svg?v=1.51.1", JSON.stringify({ src: ui.sidebarLogoSrc, dark: ui.dark }));
+ok("UI 1.52.0: logo zijbalk altijd licht", ui.sidebarLogoSrc === "/btechnics_branding/logo.svg?v=1.52.0", JSON.stringify({ src: ui.sidebarLogoSrc, dark: ui.dark }));
+// v1.52.0: toestel in donkere modus, en een gebruiker die zelf donker kiest: toch licht
+{
+  const dctx = await browser.newContext({ viewport: { width: 1200, height: 800 }, colorScheme: "dark" });
+  await dctx.addInitScript((t) => { localStorage.setItem("hassTokens", JSON.stringify(t)); }, stored);
+  const dp = await dctx.newPage();
+  await dp.goto(BASE + "/config/dashboard"); await sleep(1500);
+  const bgStart = await dp.evaluate(() => getComputedStyle(document.documentElement).backgroundColor);
+  // wachten tot HA geladen is (2026.9.4 is trager), max 40 s
+  await dp.waitForFunction(() => document.querySelector("home-assistant")?.hass?.themes !== undefined, null, { timeout: 40000 }).catch(() => {});
+  await sleep(4000);
+  const lees = () => dp.evaluate(() => ({
+    dark: document.querySelector("home-assistant")?.hass?.themes?.darkMode,
+    mm: window.matchMedia("(prefers-color-scheme: dark)").matches,
+    bg: getComputedStyle(document.documentElement).getPropertyValue("--primary-background-color").trim(),
+  }));
+  const d1 = await lees();
+  ok("Altijd licht: donker toestel krijgt licht thema", d1.dark === false && d1.mm === false && /^#f/i.test(d1.bg) && !/rgb\(1[0-9], 1[0-9], 1[0-9]\)/.test(bgStart), JSON.stringify({ ...d1, bgStart }));
+  await dp.evaluate(() => document.querySelector("home-assistant").dispatchEvent(new CustomEvent("settheme", { detail: { dark: true }, bubbles: true, composed: true })));
+  await sleep(6000);
+  const d2 = await lees();
+  ok("Altijd licht: zelf donker kiezen wordt teruggezet", d2.dark === false && /^#f/i.test(d2.bg), JSON.stringify(d2));
+  await dctx.close();
+}
 ok("UI: tekst in zijbalk", ui.sidebarText === "Btechnics IOT", ui.sidebarText);
 ok("UI: petrol als primaire kleur", ui.primary.toLowerCase() === "#00222b", ui.primary);
 ok("UI: enquete uit", ui.survey);
@@ -577,13 +607,13 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
   // v1.33.1: https verplicht (behalve lokaal adres)
   const fout = await setOpts({ ...ALLES, status_url: "http://work.btechnics.be/api/iot/status", status_token: "testsleutel" });
   ok("Status: http naar buiten geweigerd", fout.f.type === "form" && fout.f.errors && fout.f.errors.status_url === "status_url_https", JSON.stringify(fout.f.errors));
-  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.51.1" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
+  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.52.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
   {
     const sw = b.software || [];
     const own = sw.find((x) => x.kind === "custom" && x.domain === "btechnics_branding");
     const hacs = sw.find((x) => x.entity_id === "update.test_hacs_integratie");
     const fw = sw.find((x) => x.entity_id === "update.test_faalt");
-    ok("Status: softwarelijst met alle versies (v1.45.0)", !!own && own.installed === "1.51.1" && !!hacs && hacs.kind === "hacs" && hacs.installed === "v1.0.0" && hacs.up_to_date === true && !!fw && fw.up_to_date === false && fw.latest === "2.0.0", JSON.stringify(sw.map((x) => `${x.kind}:${x.name}=${x.installed}${x.up_to_date === false ? "->" + x.latest : ""}`)));
+    ok("Status: softwarelijst met alle versies (v1.45.0)", !!own && own.installed === "1.52.0" && !!hacs && hacs.kind === "hacs" && hacs.installed === "v1.0.0" && hacs.up_to_date === true && !!fw && fw.up_to_date === false && fw.latest === "2.0.0", JSON.stringify(sw.map((x) => `${x.kind}:${x.name}=${x.installed}${x.up_to_date === false ? "->" + x.latest : ""}`)));
   }
   ok("Status: geen sleutel in het bericht", !JSON.stringify(b).includes("testsleutel"));
   {
@@ -868,7 +898,8 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
         const rows = all(document, "ha-row-item").filter((r) => { const h = r.querySelector('[slot="headline"]'); return h && h.textContent.trim() === kop; });
         return { pad: location.pathname, rol: all(document, ".bt-role").map((e) => e.textContent), rows: rows.length, zichtbaar: rows.filter((r) => r.offsetParent !== null).length };
       });
-      const bezoek = async (pg) => { const out = []; for (const pad of ["/profile", "/profile/preferences"]) { await pg.goto(BASE + pad); await sleep(8000); out.push(await kijk(pg)); } return out; };
+      // eerste bezoek in een nieuwe browser: HA registreert zijn service worker en herlaadt rond 8 s (controllerchange), dus langer wachten
+      const bezoek = async (pg) => { const out = []; let eerste = true; for (const pad of ["/profile", "/profile/preferences"]) { await pg.goto(BASE + pad); await sleep(eerste ? 13000 : 8000); eerste = false; out.push(await kijk(pg)); } return out; };
       const pI = await bezoek(pp);
       const prof = { rol: pI[0].rol, rows: pI[0].rows + pI[1].rows, zichtbaar: pI[0].zichtbaar + pI[1].zichtbaar, pI };
       // lang drukken op de titel van de zijbalk opent het dialoog via show-dialog: geblokkeerd
