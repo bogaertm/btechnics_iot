@@ -150,6 +150,9 @@ _ICON_SVG_URL = "/btechnics_branding/app-icon.svg"
 
 _LOGO_SVG_FILE = str(_DIR / "logo.svg")
 _LOGO_SVG_URL = "/btechnics_branding/logo.svg"
+# v1.53.0: logo met baseline voor de petrol zijbalkkop (witte tekst)
+_LOGO_SIDEBAR_FILE = str(_DIR / "logo-zijbalk.svg")
+_LOGO_SIDEBAR_URL = "/btechnics_branding/logo-zijbalk.svg"
 _FAVICON_ICO_FILE = str(_DIR / "favicon.ico")
 _FAVICON_ICO_URL = "/btechnics_branding/favicon.ico"
 _APPLE_PNG_RE = re.compile(r"/static/icons/favicon-apple-\d+x\d+\.png")
@@ -163,6 +166,7 @@ _API_URL = "/api/btechnics_branding/config"
 _LAUNCH_LOGO_HA = "/static/images/home-assistant-logo-loading.svg"
 _BT_PETROL = "#04212b"  # v1.51.0: kleur van de tegel van het app-icoon
 _HA_THEME_COLOR = "#2980b9"
+_ITUNES_RE = re.compile(r'<meta name="apple-itunes-app"[^>]*>')
 _HTML_REPLACE = (
     ("<title>Home Assistant</title>", "<title>Btechnics IOT</title>"),
     ('content="Home Assistant"', 'content="Btechnics IOT"'),
@@ -382,6 +386,8 @@ def _patch_response(response, request_path: str, file_text: str | None = None):
     # Safari kleurt een mask-icon effen in: van een gevulde tegel blijft een oranje
     # rechthoek over. Weg ermee, Safari neemt dan het gewone icoon.
     patched = _MASK_LINK_RE.sub("", patched)
+    # v1.53.0: geen Safari-banner voor de Home Assistant iOS-app
+    patched = _ITUNES_RE.sub("", patched)
     patched = _ICON_PNG_RE.sub(f"{_ICON_192_URL}?v={_BT_VERSION}", patched)
     patched = patched.replace('"/static/icons/favicon.ico"', f'"{_FAVICON_ICO_URL}?v={_BT_VERSION}"')
     _LOGGER.debug("BT: HTML gepatcht voor %s (auth=%s)", request_path, is_auth)
@@ -434,6 +440,16 @@ def _make_manifest_handler(original):
                     {"src": _ICON_MASK_512_URL + v, "sizes": "512x512", "type": "image/png", "purpose": "maskable"},
                 ]
                 m["background_color"] = _BT_PETROL
+                # v1.53.0: klanten installeren Btechnics IOT als PWA (Android, iOS, desktop),
+                # niet de Home Assistant app. Met prefer_related_applications=true bood
+                # Chrome op Android de HA-app in de Play Store aan in plaats van de PWA.
+                m["prefer_related_applications"] = False
+                m.pop("related_applications", None)
+                m.pop("screenshots", None)  # schermafbeelding van Home Assistant
+                m["description"] = "Btechnics IOT"
+                m["lang"] = "nl"
+                m["display"] = "standalone"
+                m["scope"] = "/"
                 return web.Response(
                     text=json.dumps(m), status=200,
                     content_type="application/manifest+json",
@@ -724,7 +740,7 @@ def _health(hass) -> dict:
 # combinatie van HA en Btechnics IOT meldt dat alles werkt, is die versie
 # bevestigd. Latere probleemmeldingen van een enkel scherm op een bevestigde
 # versie worden genegeerd (enkel gelogd). Na een update begint het opnieuw.
-_BT_VERSION = "1.52.0"
+_BT_VERSION = "1.53.0"
 _HEALTH_STORE = f"{DOMAIN}.health"
 
 
@@ -873,6 +889,7 @@ async def async_setup_entry(hass: HomeAssistant, entry) -> bool:
             StaticPathConfig(_ICON_192_URL, _ICON_192_FILE, cache_headers=True),
             StaticPathConfig(_FAVICON_ICO_URL, _FAVICON_ICO_FILE, cache_headers=True),
             StaticPathConfig(_LOGO_SVG_URL, _LOGO_SVG_FILE, cache_headers=True),
+            StaticPathConfig(_LOGO_SIDEBAR_URL, _LOGO_SIDEBAR_FILE, cache_headers=True),
             StaticPathConfig(_ICON_MASK_192_URL, _ICON_MASK_192_FILE, cache_headers=True),
             StaticPathConfig(_ICON_MASK_512_URL, _ICON_MASK_512_FILE, cache_headers=True),
             StaticPathConfig(_ICON_APPLE_URL, _ICON_APPLE_FILE, cache_headers=True),

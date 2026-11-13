@@ -36,10 +36,12 @@
 const BRAND = "Btechnics IOT";
 // v1.51.0: bovenaan, want BT gebruikt de versie in de adressen. Iconen en logo staan
 // 31 dagen in de cache (cache_headers van HA); een nieuwe versie geeft een nieuw adres.
-const BT_VERSION = "1.52.0";
+const BT_VERSION = "1.53.0";
 
 const BT = {
   logo: "/btechnics_branding/logo.svg?v=" + BT_VERSION,
+  // v1.53.0: logo met baseline en witte tekst voor de petrol zijbalkkop
+  logoSidebar: "/btechnics_branding/logo-zijbalk.svg?v=" + BT_VERSION,
   icon: "/btechnics_branding/app-icon-192.png?v=" + BT_VERSION,
   loginText: BRAND,
   loginSize: 24,
@@ -50,6 +52,25 @@ const BT = {
   zoomBreakpoint: 870,
   customerLogo: null,   // URL van het geuploade klantenlogo (of null)
   customerScale: 100,   // schaal in % t.o.v. het Btechnics logo
+};
+
+// v1.53.0: installeren als app (PWA). Chrome, Edge en Samsung Internet sturen
+// beforeinstallprompt naar het hoofdvenster, niet naar de IOT APP pagina (die is een
+// iframe). We bewaren het hier; de pagina roept window.parent.btInstall() aan.
+window.btInstallPrompt = null;
+window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); window.btInstallPrompt = e; });
+window.addEventListener("appinstalled", () => { window.btInstallPrompt = null; window.btInstalled = true; });
+window.btIsStandalone = () => {
+  try { return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true; }
+  catch (e) { return false; }
+};
+window.btInstall = async () => {
+  const p = window.btInstallPrompt;
+  if (!p) return "geen";
+  p.prompt();
+  const r = await p.userChoice.catch(() => ({ outcome: "dismissed" }));
+  window.btInstallPrompt = null;
+  return r.outcome;
 };
 
 async function loadConfig() {
@@ -179,14 +200,25 @@ function patchLaunchScreen() {
   ensureCustomerLogo(img.parentNode, img, "bt-launch-customer-logo", 80, 24);
 }
 
+// v1.53.0: aanmeldscherm toont het btechnics.be logo (petrol, met baseline), niet het app-icoon
+function btLoginLogo(img) {
+  img.src = BT.logo;
+  img.style.height = "56px";
+  img.style.width = "auto";
+  img.style.maxWidth = "100%";
+  img.dataset.bt = "1";
+}
+
 function patchLoginPage() {
   deepQuery(document, 'img[src*="favicon-192x192"], img[src*="favicon-512x512"], img[src*="favicon-384x384"]')
-    .forEach(img => { if (!img.dataset.bt) { img.src = BT.icon; img.dataset.bt = "1"; } });
+    .forEach(img => { if (!img.dataset.bt) { btLoginLogo(img); } });
 
   // Aanmeldscherm: <div class="header"><img></div> (authorize.html.template)
   const loginHeader = document.querySelector(".content > .header");
   if (loginHeader) {
     const icon = loginHeader.querySelector("img:not(.bt-login-customer-logo)");
+    // v1.53.0: de server zette hier al het app-icoon; dat wordt het logo
+    if (icon && icon.dataset.bt !== "logo") { btLoginLogo(icon); icon.dataset.bt = "logo"; icon.removeAttribute("height"); }
     ensureCustomerLogo(loginHeader, icon, "bt-login-customer-logo", 56, 20);
   }
 
@@ -194,12 +226,7 @@ function patchLoginPage() {
   haAuthEls.forEach(haAuth => {
     if (haAuth.shadowRoot) {
       haAuth.shadowRoot.querySelectorAll('img').forEach(img => {
-        if (!img.dataset.bt) {
-          img.src = BT.icon;
-          img.style.height = "64px";
-          img.style.width = "auto";
-          img.dataset.bt = "1";
-        }
+        if (!img.dataset.bt) btLoginLogo(img);
       });
     }
   });
@@ -231,9 +258,10 @@ function patchSidebar() {
   // geschaald, breedte automatisch, met een maximale breedte zodat een breed klantenlogo de
   // regel nooit breekt. Rij 2 is de tekst, op een regel met afkapping. Zo kan geen enkel logo
   // de tekst uit de kop duwen, wat er sinds v1.28.2 gebeurde (.title is geen flex container).
-  const LOGO_H = 28;
+  const LOGO_H = 34;  // v1.53.0: logo met baseline, iets hoger voor de leesbaarheid
   title.style.cssText = "display:flex;flex-direction:column;justify-content:center;gap:3px;" +
-    "overflow:hidden;line-height:1.2;padding-left:8px;box-sizing:border-box;";
+    "overflow:hidden;line-height:1.2;padding-left:8px;padding-right:12px;box-sizing:border-box;" +
+    "flex:1 1 auto;min-width:0;";  // v1.53.0: nooit breder dan de kop, anders werd het logo afgesneden
 
   let rij = sr.querySelector(".bt-logos");
   if (!rij) {
@@ -242,7 +270,7 @@ function patchSidebar() {
     title.insertBefore(rij, title.firstChild);
   }
   rij.style.cssText = "display:flex;align-items:center;gap:10px;height:" + LOGO_H + "px;" +
-    "max-width:100%;overflow:hidden;flex-shrink:0;";
+    "max-width:100%;min-width:0;overflow:hidden;flex-shrink:0;";
 
   let logo = sr.querySelector(".bt-sidebar-logo");
   if (!logo) {
@@ -250,9 +278,9 @@ function patchSidebar() {
     logo.className = "bt-sidebar-logo";
     logo.alt = "";
   }
-  // v1.51.1: altijd het lichte logo (geen donkere versie)
-  if (logo.getAttribute("src") !== BT.logo) logo.src = BT.logo;
-  logo.style.cssText = "height:" + LOGO_H + "px;width:auto;max-width:60%;object-fit:contain;" +
+  // v1.53.0: petrol zijbalkkop met het logo met baseline (witte tekst)
+  if (logo.getAttribute("src") !== BT.logoSidebar) logo.src = BT.logoSidebar;
+  logo.style.cssText = "height:" + LOGO_H + "px;width:auto;max-width:" + (BT.customerLogo ? "60%" : "100%") + ";object-fit:contain;" +
     "object-position:left center;display:block;flex-shrink:1;min-width:0;";
   if (logo.parentNode !== rij) rij.appendChild(logo);
 
@@ -265,14 +293,30 @@ function patchSidebar() {
     }
     // Schaal enkel naar beneden in de zijbalk: hoger dan de logoregel kan nooit.
     const h = Math.round(LOGO_H * Math.min(BT.customerScale, 100) / 100);
+    // Witte pil: klantlogo's zijn meestal voor een lichte achtergrond gemaakt en vallen weg op petrol.
     klant.style.cssText = "height:" + h + "px;width:auto;max-width:40%;object-fit:contain;" +
-      "object-position:left center;display:block;flex-shrink:1;min-width:0;";
+      "object-position:left center;display:block;flex-shrink:1;min-width:0;" +
+      "background:#ffffff;border-radius:6px;padding:3px 6px;box-sizing:content-box;";
     if (klant.getAttribute("src") !== BT.customerLogo) klant.src = BT.customerLogo;
     if (klant.parentNode !== rij) rij.appendChild(klant);
   } else if (klant) {
     klant.remove();
   }
 
+  // v1.53.0: kleuren van de kop en de selectie (Variant B, keuze Matthias 13/11)
+  if (!sr.querySelector("style.bt-sb-style")) {
+    const st = document.createElement("style");
+    st.className = "bt-sb-style";
+    st.textContent =
+      ".menu{background-color:#04212B!important;border-bottom-color:#04212B!important;color:#fff!important}" +
+      ".menu ha-icon-button{color:#fff!important}" +
+      "ha-list-item-button.selected{box-shadow:inset 4px 0 0 #ED6928}" +
+      "ha-list-item-button.selected::before{background-color:#04212B!important;opacity:.08!important}";
+    sr.appendChild(st);
+  }
+
+  // De tekst onder het logo enkel als de klant een eigen tekst instelde; het logo zegt al Btechnics.
+  const toonTekst = BT.sidebarText && BT.sidebarText !== BRAND;
   let span = sr.querySelector(".bt-sidebar-text");
   if (!span) {
     span = document.createElement("span");
@@ -283,7 +327,9 @@ function patchSidebar() {
   if (span.textContent !== BT.sidebarText) span.textContent = BT.sidebarText;
   span.style.cssText = "display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" +
     "font-size:" + BT.sidebarSize + "px;";
-  if (span.parentNode !== title) title.appendChild(span);
+  span.style.color = "#fff";
+  if (toonTekst) { if (span.parentNode !== title) title.appendChild(span); }
+  else if (span.parentNode) span.remove();
 }
 
 // mdiHomeAssistant pad begint zo (src/resources/home-assistant-logo-svg.ts)
@@ -433,6 +479,12 @@ function patchColors() {
     "--accent-color": BT_COLORS.orange,
     "--rgb-accent-color": "237, 105, 40",
     "--ha-color-text-link": primary,
+    // v1.53.0: petrol bovenbalk, petrol selectie in de zijbalk
+    "--app-header-background-color": "#04212B",
+    "--app-header-text-color": "#ffffff",
+    "--app-header-border-bottom": "none",
+    "--sidebar-selected-icon-color": "#04212B",
+    "--sidebar-selected-text-color": "#04212B",
   };
   for (const k in BT_COLORS.scale) vars["--ha-color-primary-" + k] = BT_COLORS.scale[k];
   for (const k in vars) {
@@ -678,6 +730,24 @@ function patchProfile() {
   }
 }
 
+// v1.53.0: de bovenbalk is petrol. Subpagina's (o.a. IOT APP) kleuren hun menu- en
+// terugknop met --sidebar-icon-color (donker, onleesbaar op petrol). Wij nemen de tekstkleur
+// van de bovenbalk; Instellingen zet zelf een lichte balk met donkere tekst, dus daar blijft
+// het donker.
+const SUBPAGE_CSS = 'ha-menu-button,ha-icon-button-arrow-prev,::slotted([slot="toolbar-icon"])' +
+  "{color:var(--app-header-text-color,var(--sidebar-icon-color))!important}";
+function patchSubpages() {
+  deepQuery(document, "hass-subpage").forEach(el => {
+    const sr = el.shadowRoot;
+    if (sr && !sr.querySelector("style.bt-subpage")) {
+      const st = document.createElement("style");
+      st.className = "bt-subpage";
+      st.textContent = SUBPAGE_CSS;
+      sr.appendChild(st);
+    }
+  });
+}
+
 function patchAllInner() {
   disableSurvey();
   patchCloud();
@@ -690,6 +760,7 @@ function patchAllInner() {
   patchInlineLogos();
   patchExternalLinks();
   patchColors();
+  patchSubpages();
   patchTitle();
   deepReplaceText(document.body, "Home Assistant", BRAND);
   deepReplaceAttrs(document.body, "Home Assistant", BRAND);
