@@ -25,6 +25,14 @@ def _summary(msg: dict) -> dict:
     msg["users"] = f"{len(users)} gebruikers" if isinstance(users, list) else None
     logs = msg.pop("logs", None) or {}
     msg["logs"] = {k: f"{len(v)} items" for k, v in logs.items() if isinstance(v, list)}
+    # v1.54.0: ook geen IP-adressen, computernamen, deuren, personen of rollen
+    apps = msg.pop("desktop_apps", None)
+    msg["desktop_apps"] = f"{len(apps)} apps" if isinstance(apps, (list, dict)) else None
+    if "toegang" in msg:
+        msg["toegang"] = "**REDACTED**" if msg.get("toegang") else None
+    if "rollen" in msg:
+        msg["rollen"] = "**REDACTED**" if msg.get("rollen") else None
+    msg["name"] = "**REDACTED**" if msg.get("name") else None
     return msg
 
 

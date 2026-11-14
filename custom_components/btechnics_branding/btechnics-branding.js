@@ -36,7 +36,7 @@
 const BRAND = "Btechnics IOT";
 // v1.51.0: bovenaan, want BT gebruikt de versie in de adressen. Iconen en logo staan
 // 31 dagen in de cache (cache_headers van HA); een nieuwe versie geeft een nieuw adres.
-const BT_VERSION = "1.53.0";
+const BT_VERSION = "1.54.0";
 
 const BT = {
   logo: "/btechnics_branding/logo.svg?v=" + BT_VERSION,
@@ -108,7 +108,8 @@ let patchTimer = null;
 // seconde wijzigen gaf anders een volledige ronde door de hele pagina bij elke waarde.
 let lastPatch = 0;
 function schedulePatch() {
-  if (patching || patchTimer) return;
+  // v1.54.0: niets doen zolang het scherm verborgen is (tablet in slaap, ander tabblad)
+  if (patching || patchTimer || document.hidden) return;
   const wacht = Math.max(60, 300 - (Date.now() - lastPatch));
   patchTimer = setTimeout(() => { patchTimer = null; patchAll(); }, wacht);
 }
@@ -155,6 +156,9 @@ function deepReplaceText(root, from, to) {
       // wijziging in zijn DOM terug als invoer, dus "Home Assistant" in YAML of een
       // template zou echt aangepast en mee opgeslagen worden.
       if (node.parentElement && node.parentElement.closest(EDITABLE_SEL)) continue;
+      // v1.54.0: bevat de nieuwe tekst de oude (bv. "Welkom thuis, familie X"), dan is een
+      // node met de nieuwe tekst al klaar; anders groeit hij bij elke ronde
+      if (to.includes(from) && node.textContent.includes(to)) continue;
       if (node.textContent.includes(from)) {
         node.textContent = node.textContent.replace(re, to);
       }
@@ -839,7 +843,12 @@ async function disableSurvey() {
   patchFavicon();
   new MutationObserver(schedulePatch)
     .observe(document.documentElement, { childList: true, subtree: true, characterData: true });
-  const start = () => { patchAll(); setInterval(patchAll, 2000); };
+  const start = () => {
+    patchAll();
+    setInterval(() => { if (!document.hidden) patchAll(); }, 2000);
+    // v1.54.0: bij terugkeren meteen bijwerken
+    document.addEventListener("visibilitychange", () => { if (!document.hidden) schedulePatch(); });
+  };
   if (document.readyState === "complete") start();
   else window.addEventListener("load", start, { once: true });
   schedulePatch();

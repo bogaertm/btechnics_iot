@@ -710,6 +710,7 @@ def async_sync_visibility(hass: HomeAssistant, options: dict, only: str | None =
         return
     reg = er.async_get(hass)
     issues = ir.async_get(hass)
+    broken = _branding_broken(hass)
     states = [hass.states.get(only)] if only else hass.states.async_all("update")
     for state in states:
         if state is None:
@@ -738,7 +739,9 @@ def async_sync_visibility(hass: HomeAssistant, options: dict, only: str | None =
         # mail "2 keer mislukt" bij de start van poging 2 (27/10, 449 en 149).
         busy = is_installing(hass, eid)
         failed = pending and not busy and tracker.count(eid, latest) >= MAX_ATTEMPTS
-        hide = pending and not failed and _managed(state, kind, options)
+        # v1.54.0: zolang de zelfcontrole een probleem meldt, installeren we niets;
+        # dan ook niets verbergen, anders ziet niemand dat er updates klaarstaan
+        hide = pending and not failed and not broken and _managed(state, kind, options)
 
         if hide and entry.hidden_by is None:
             reg.async_update_entity(eid, hidden_by=er.RegistryEntryHider.INTEGRATION)

@@ -15,20 +15,22 @@ Instellingen > Apparaten en diensten > Btechnics IOT > Configureren:
 | Klantenlogo (upload, naast het Btechnics logo in zijbalk, aanmeld- en opstartscherm) | geen |
 | Grootte klantenlogo (% van het Btechnics logo) | 100 |
 
-## Installatie via HACS
+## Installatie
 
-1. HACS → Integraties → ⋮ → Aangepaste opslagplaatsen
-2. Voeg toe: `https://github.com/bogaertm/btechnics_iot` — categorie: **Integratie**
-3. Zoek "Btechnics IOT" en installeer
+Via de Marktplaats van Home Assistant (2026.11) of via HACS:
+
+1. Marktplaats > Voeg toe via link, of HACS > Integraties > Aangepaste opslagplaatsen: `https://github.com/bogaertm/btechnics_iot` (categorie Integratie)
+2. Btechnics IOT Features installeren
+3. Instellingen > Apparaten en diensten > Toevoegen > Btechnics IOT (de Marktplaats vraagt dat meteen)
 4. Herstart de installatie
-5. Instellingen → Integraties → + Toevoegen → Btechnics IOT
-6. Voeg toe aan `configuration.yaml`:
-```yaml
-frontend:
-  extra_module_url:
-    - /btechnics_branding/btechnics-branding.js
-```
-7. Herstart de installatie opnieuw
+
+Een regel in `configuration.yaml` is niet nodig: de integratie laadt haar script zelf.
+
+Zolang de integratie niet geinstalleerd is, toont de Marktplaats een grijs icoon. Na de installatie komt het Btechnics IOT icoon.
+
+## Installeren als app
+
+In de zijbalk staat **IOT APP**. Die pagina toont per toestel hoe je Btechnics IOT als app op het beginscherm zet, zonder de Home Assistant-app: iPhone en iPad via Safari, Android via Chrome, en op de computer een installeerknop plus de desktop-apps voor Mac en Windows.
 
 ## Automatische updates
 
@@ -36,7 +38,7 @@ In de opties staat **Automatische updates** (standaard uit). Aan betekent: elke 
 
 - Core enkel vanaf de eerste bugfix van een maand (x.1), nooit een .0, beta of release candidate.
 - Back-up voor elke update die dat ondersteunt (Core, OS, apps).
-- Geen updates zolang de zelfcontrole een probleem met de branding meldt.
+- Geen updates zolang de zelfcontrole een probleem met de branding meldt. Ze blijven dan zichtbaar, zodat je ziet dat er iets klaarstaat.
 - Core en OS herstarten het systeem, dus hoogstens een van beide per nacht. Na HACS updates volgt een herstart.
 - Een update die je zelf overslaat, wordt nooit automatisch geinstalleerd.
 - Wat er gebeurd is, staat in Activiteit onder "Btechnics IOT updates".
@@ -52,7 +54,9 @@ Service `btechnics_branding.send_status` verstuurt meteen en toont wat er verstu
 
 ## Bediening op afstand
 
-Met een sleutel ingevuld en **Bediening op afstand door Btechnics** aan (standaard aan), haalt de installatie elke minuut opdrachten op bij de Work-app. Er hoeft geen poort open. Enkel deze opdrachten bestaan: automatische updates aan/uit en instellen, de run nu starten (of enkel tonen), een update installeren, overslaan of terugzetten, mislukte pogingen wissen en de status meteen versturen. Al de rest wordt geweigerd. Alles komt in Activiteit onder "Btechnics IOT updates".
+Met een sleutel ingevuld en **Bediening op afstand door Btechnics** aan (standaard aan), haalt de installatie elke minuut opdrachten op bij de Work-app. Er hoeft geen poort open. Enkel deze opdrachten bestaan: automatische updates aan/uit en instellen, de run nu starten (of enkel tonen), een update installeren, overslaan of terugzetten, mislukte pogingen wissen, de status meteen versturen, HA of het toestel herstarten, gebruikersbeheer, rollen en dashboards per rol (zichtbaarheid, standaarddashboard, "Alleen beheerders") en deurtoegang via Btechnics Toegang. Al de rest wordt geweigerd.
+
+Een update op afstand volgt dezelfde veiligheidsregels als de nachtelijke run: geen Core .0, beta of release candidate, en niets zolang de zelfcontrole een probleem meldt. Met `"force": true` gaat het toch, bewust. Alles komt in Activiteit onder "Btechnics IOT updates".
 
 ### Herstart, meldingen en gebruikers (v1.35.0)
 
@@ -71,7 +75,8 @@ De status bevat `desktop_apps`: de Btechnics IOT desktop-apps (Mac en Windows) d
 - Opdrachten hebben een vervaldatum en worden nooit twee keer uitgevoerd, ook niet na een herstart.
 - Geen redirects, antwoord hoogstens 256 kB, enkel https (lokaal adres mag http), ja/nee velden strikt.
 - De sleutel gaat niet meer naar de browser (leeg laten = ongewijzigd, wissen met een vinkje).
-- Diagnose bevat geen gebruikers, adres of logs.
+- Diagnose bevat geen gebruikers, adres, logs, IP-adressen, computernamen, deuren of rollen.
+- Lukt een herstart op afstand niet (bv. ongeldige configuratie), dan haalt de installatie na 10 minuten weer opdrachten op.
 
 ## Woordkeuze
 
@@ -80,11 +85,11 @@ In het Nederlands spreekt Home Assistant van "woning", "je huis" en "Welkom thui
 ## Diagnose en verwijderen
 
 - **Diagnose downloaden** (Instellingen > Apparaten en diensten > Btechnics IOT > drie puntjes): alles wat de integratie weet in een bestand, zonder sleutel. Handig bij support.
-- **Verwijderen**: het klantenlogo, de bijgehouden pogingen en alles wat verborgen was, worden opgeruimd.
+- **Verwijderen**: het klantenlogo, de bijgehouden pogingen, de verborgen updates en de dashboards die per rol verborgen of als standaard gezet waren, worden opgeruimd. De rollen zelf blijven bewaard (Btechnics VTO en VIGI lezen ze) en "Alleen beheerders" bij een dashboard blijft staan, want dat is een gewone HA-instelling.
 
 ## Vereisten
 
-Home Assistant 2026.8.0 of nieuwer. Getest op 2026.8.0 en 2026.9.3. Op oudere versies toont onder meer het opstartscherm nog het oorspronkelijke logo.
+Home Assistant 2026.8.0 of nieuwer. Elke versie wordt getest op de laatste stabiele versie en op 2026.9.4. Op oudere versies toont onder meer het opstartscherm nog het oorspronkelijke logo.
 
 ## Na een update
 

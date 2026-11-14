@@ -740,7 +740,7 @@ def _health(hass) -> dict:
 # combinatie van HA en Btechnics IOT meldt dat alles werkt, is die versie
 # bevestigd. Latere probleemmeldingen van een enkel scherm op een bevestigde
 # versie worden genegeerd (enkel gelogd). Na een update begint het opnieuw.
-_BT_VERSION = "1.53.0"
+_BT_VERSION = "1.54.0"
 _HEALTH_STORE = f"{DOMAIN}.health"
 
 
@@ -794,6 +794,7 @@ def _update_issue(hass) -> None:
         async_dispatcher_send(hass, status.SIGNAL_CHANGED, "branding")
     if not problems:
         ir.async_delete_issue(hass, DOMAIN, _ISSUE_ID)
+        _resync_updates(hass)
         return
     _LOGGER.warning("BT zelfcontrole: werkt niet meer na update: %s", problems)
     ir.async_create_issue(
@@ -808,6 +809,21 @@ def _update_issue(hass) -> None:
             "ha_version": HA_VERSION,
         },
     )
+    _resync_updates(hass)
+
+
+@callback
+def _resync_updates(hass) -> None:
+    """v1.54.0: verborgen updates volgen de stand van de zelfcontrole."""
+    from homeassistant.config_entries import ConfigEntryState
+
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        if entry.state is not ConfigEntryState.LOADED:
+            continue  # review 1.54.0: uitgeschakeld of nog bezig met laden, niets aanraken
+        try:
+            auto_update.apply_options(hass, dict(entry.options))
+        except Exception:  # noqa: BLE001
+            _LOGGER.exception("BT: updates opnieuw tonen of verbergen lukte niet")
 
 
 class BtechnicsBrandingHealthView(HomeAssistantView):
@@ -989,6 +1005,11 @@ async def async_remove_entry(hass: HomeAssistant, entry) -> None:
     await (tracker._store if tracker else Store(hass, 1, f"{DOMAIN}.auto_update")).async_remove()  # noqa: SLF001
     await remote.async_remove(hass)
     await desktop.async_remove(hass)
+    try:
+        from . import roles
+        await roles.async_remove(hass)  # v1.54.0
+    except Exception:  # noqa: BLE001
+        _LOGGER.exception("BT: rollen niet opgeruimd")
     health_store = _health(hass).get("store")
     hass.data.pop(_HEALTH_KEY, None)
     await (health_store or Store(hass, 1, _HEALTH_STORE)).async_remove()

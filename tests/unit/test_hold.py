@@ -45,3 +45,4 @@ todo,skipped=au.plan(hass,opts); names=[u["entity_id"] for u in todo]
 check("nieuwere versie wacht opnieuw", "update.mosq" not in names)
 check("opgeslagen in Store", "seen" in tr._store.saved and "update.mosq" in tr._store.saved["seen"])
 print("RESULTAAT", "ALLES OK" if ok else "FOUTEN")
+sys.exit(0 if ok else 1)

@@ -10,6 +10,7 @@ Work-app door en sturen het antwoord terug.
 """
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 from homeassistant.core import HomeAssistant
@@ -29,6 +30,9 @@ def enabled(options: dict) -> bool:
     return bool(options.get(CONF_REMOTE_TOEGANG, False))
 
 
+_TIMEOUT_S = 60
+
+
 def available(hass: HomeAssistant) -> bool:
     return hass.services.has_service(SERVICE_DOMAIN, SERVICE)
 
@@ -37,9 +41,14 @@ async def _call(hass: HomeAssistant, actie: str, velden: dict, door: str | None)
     data: dict[str, Any] = {"actie": actie, "velden": velden}
     if door:
         data["door"] = door
-    return await hass.services.async_call(
+    # v1.54.0: een deurcontroller die niet antwoordt mag status en bediening niet blokkeren.
+    # shield: na de tijdslimiet loopt de deuractie zelf verder, enkel wij wachten niet meer.
+    task = hass.async_create_task(hass.services.async_call(
         SERVICE_DOMAIN, SERVICE, data, blocking=True, return_response=True,
-    )
+    ), "btechnics_branding_toegang")
+    # een fout na de tijdslimiet niet als "never retrieved" in het log laten
+    task.add_done_callback(lambda t: t.cancelled() or t.exception())
+    return await asyncio.wait_for(asyncio.shield(task), _TIMEOUT_S)
 
 
 async def async_execute(hass: HomeAssistant, options: dict, cmd: dict) -> Any:
@@ -61,6 +70,9 @@ async def async_execute(hass: HomeAssistant, options: dict, cmd: dict) -> Any:
                            "toegang_ontbreekt")
     try:
         return await _call(hass, actie.strip(), velden, (door or "").strip()[:80] or None)
+    except TimeoutError as err:
+        msg = f"Btechnics Toegang antwoordt niet binnen {_TIMEOUT_S} s"
+        raise CommandError(msg, "toegang", msg) from err
     except HomeAssistantError as err:
         msg = str(err) or type(err).__name__
         raise CommandError(msg, "toegang", msg) from err

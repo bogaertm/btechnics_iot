@@ -63,6 +63,8 @@ _TIME_RE = re.compile(r"^([01]?\d|2[0-3]):([0-5]\d)(?::([0-5]\d))?$")
 _UPDATE_RE = re.compile(r"^update\.[a-z0-9_]+$")
 _ID_RE = re.compile(r"^[A-Za-z0-9_.:-]{1,64}$")
 _RESTART_DELAY = 5  # na het versturen van het resultaat
+# v1.54.0: lukt de herstart niet (bv. ongeldige configuratie), dan na deze tijd weer ophalen
+_RESTART_GRACE = timedelta(minutes=10)
 _RESTARTS = {"restart": ("homeassistant", "restart"), "reboot_host": ("hassio", "host_reboot")}
 
 
@@ -81,7 +83,13 @@ def _schedule(hass: HomeAssistant, domain: str, service: str, why: str) -> None:
     auto_update._log(hass, why)  # noqa: SLF001
 
     async def _go(_now) -> None:
-        await hass.services.async_call(domain, service, {}, blocking=False)
+        try:
+            await hass.services.async_call(domain, service, {}, blocking=False)
+        except Exception as err:  # noqa: BLE001
+            # v1.54.0: niet stil blijven hangen; de bediening haalt weer op
+            _LOGGER.warning("Herstart %s.%s lukte niet: %s", domain, service, err)
+            auto_update._log(hass, f"herstart lukte niet: {err}")  # noqa: SLF001
+            _state(hass)["restart_pending"] = None
 
     async_call_later(hass, _RESTART_DELAY, _go)
 
@@ -213,6 +221,16 @@ async def _execute(hass: HomeAssistant, entry, cmd: dict) -> tuple[bool, Any]:
             raise ValueError(f"{eid} heeft geen openstaande update")
         if not features & 1:
             raise ValueError(f"{eid} kan niet vanop afstand geinstalleerd worden")
+        # v1.54.0: dezelfde veiligheidsregels als de nachtelijke run, tenzij bewust "force": true
+        if not _bool(cmd, "force", False):
+            from homeassistant.helpers import entity_registry as er
+            if auto_update._branding_broken(hass):  # noqa: SLF001
+                raise ValueError("de zelfcontrole meldt een probleem met de branding; "
+                                 "eerst nakijken of opnieuw met force: true")
+            if auto_update._kind(er.async_get(hass).async_get(eid)) == "core":  # noqa: SLF001
+                allowed, why = auto_update.core_version_allowed(st.attributes.get("latest_version"))
+                if not allowed:
+                    raise ValueError(f"{why}; opnieuw met force: true om toch te installeren")
         data: dict[str, Any] = {"entity_id": eid}
         if _bool(cmd, "backup", True) and features & 8:
             data["backup"] = True
@@ -403,7 +421,12 @@ async def async_poll(hass: HomeAssistant, entry) -> dict:
         result.update(ok=False, error="uitgeschakeld, geen sleutel of adres niet toegelaten")
         st["last"] = result
         return result
-    if st["busy"] or st["running"] or st.get("restart_pending"):
+    pending = st.get("restart_pending")
+    if pending and dt_util.utcnow() - pending > _RESTART_GRACE:
+        # v1.54.0: de herstart is er niet gekomen, dus weer opdrachten ophalen
+        _LOGGER.warning("Geplande herstart bleef uit, de bediening op afstand haalt weer op")
+        st["restart_pending"] = pending = None
+    if st["busy"] or st["running"] or pending:
         result.update(ok=True, skipped="vorige opdrachten lopen nog")
         return result
     st["busy"] = True
@@ -469,7 +492,7 @@ async def async_poll(hass: HomeAssistant, entry) -> dict:
                 finally:
                     if restart:
                         # Pas nu: alle resultaten zijn vertrokken. Tot de herstart niet meer ophalen.
-                        st["restart_pending"] = True
+                        st["restart_pending"] = dt_util.utcnow()
                         _schedule(hass, *restart)
                     st["running"] = False
 

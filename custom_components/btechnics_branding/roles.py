@@ -637,6 +637,41 @@ async def _apply_sidebar(hass: HomeAssistant, user, async_user_store) -> bool:
     return changed
 
 
+async def async_remove(hass: HomeAssistant) -> None:
+    """v1.54.0: integratie verwijderd. Onze verborgen panelen en ons standaarddashboard
+    terugzetten per gebruiker. De rollen zelf (.storage/btechnics_roles) blijven, want
+    Btechnics VTO en VIGI lezen ze. "Alleen beheerders" is een gewone HA-instelling
+    (Instellingen > Dashboards) en blijft staan: weghalen zou dashboards openzetten."""
+    from homeassistant.components.frontend.storage import async_user_store
+
+    for unsub in (hass.data.pop(_SUBS, None) or {}).values():
+        try:
+            unsub[1]()
+        except Exception:  # noqa: BLE001
+            pass
+    data = await async_load(hass)
+    verborgen = dict(data.get("verborgen") or {})
+    gezet = dict(data.get("standaard_gezet") or {})
+    for user_id in set(verborgen) | set(gezet):
+        try:
+            store = await async_user_store(hass, user_id)
+            ours = set(verborgen.get(user_id) or [])
+            side = store.data.get("sidebar") if isinstance(store.data.get("sidebar"), dict) else None
+            if ours and side is not None:
+                hidden = [p for p in side.get("hiddenPanels") or [] if p not in ours]
+                await store.async_set_item("sidebar", {**side, "hiddenPanels": hidden})
+            key = gezet.get(user_id)
+            pad = key.split(":", 1)[1] if key and ":" in key else key
+            core = store.data.get("core") if isinstance(store.data.get("core"), dict) else None
+            if pad and core is not None and core.get("default_panel") == pad:
+                await store.async_set_item("core", {k: v for k, v in core.items() if k != "default_panel"})
+        except Exception as err:  # noqa: BLE001
+            _LOGGER.warning("BT rollen: zijbalk van %s niet teruggezet: %s", user_id, err)
+    rest = {k: v for k, v in data.items() if k not in ("verborgen", "standaard_gezet")}
+    if rest != data:
+        await _async_save(hass, rest)
+
+
 async def async_apply_sidebars(hass: HomeAssistant) -> int:
     n = 0
     for user in await hass.auth.async_get_users():

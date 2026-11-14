@@ -69,6 +69,13 @@ const bytes = async (u) => Buffer.from(await (await fetch(BASE + u)).arrayBuffer
 const man = JSON.parse(await text("/manifest.json"));
 ok("Manifest: naam", man.name === "Btechnics IOT", man.name);
 ok("Manifest: iconen", (man.icons || []).every((i) => i.src.startsWith("/btechnics_branding/")));
+// v1.54.0: versie op de drie plaatsen gelijk
+{
+  const mv = JSON.parse(fs.readFileSync(path.join(COMP, "manifest.json"), "utf8")).version;
+  const pv = (fs.readFileSync(path.join(COMP, "__init__.py"), "utf8").match(/^_BT_VERSION = "([^"]+)"/m) || [])[1];
+  const jv = (fs.readFileSync(path.join(COMP, "btechnics-branding.js"), "utf8").match(/^const BT_VERSION = "([^"]+)";/m) || [])[1];
+  ok("Versie 1.54.0: manifest, __init__.py en script gelijk", mv === pv && pv === jv, JSON.stringify({ mv, pv, jv }));
+}
 // v1.53.0: installeren als PWA, nooit de Home Assistant app voorstellen
 ok("Manifest 1.53.0: PWA, geen HA-app", man.prefer_related_applications === false && !man.related_applications && !man.screenshots && man.display === "standalone" && man.scope === "/" && man.description === "Btechnics IOT" && man.lang === "nl", JSON.stringify({ p: man.prefer_related_applications, r: man.related_applications, s: man.screenshots, d: man.display, sc: man.scope, de: man.description, l: man.lang }));
 // v1.52.0: nieuw app-icoon, any en maskable apart, geversioneerd, petrol als thema
@@ -76,7 +83,7 @@ ok("Manifest 1.53.0: PWA, geen HA-app", man.prefer_related_applications === fals
   const ic = man.icons || [];
   const any = ic.filter((i) => i.purpose === "any").map((i) => i.sizes).sort().join();
   const mask = ic.filter((i) => i.purpose === "maskable").map((i) => i.sizes).sort().join();
-  ok("Manifest 1.51: any en maskable 192 en 512", any === "192x192,512x512" && mask === "192x192,512x512" && ic.every((i) => /\?v=1\.53\.0$/.test(i.src)), JSON.stringify(ic));
+  ok("Manifest 1.51: any en maskable 192 en 512", any === "192x192,512x512" && mask === "192x192,512x512" && ic.every((i) => /\?v=1\.54\.0$/.test(i.src)), JSON.stringify(ic));
   const m512 = ic.find((i) => i.purpose === "maskable" && i.sizes === "512x512");
   ok("Manifest 1.51: maskable bestand klopt", !!m512 && (await bytes(m512.src)).equals(fs.readFileSync(path.join(COMP, "app-icon-maskable-512.png"))));
   ok("Manifest 1.51: themakleur petrol #04212b", String(man.theme_color).toLowerCase() === "#04212b" && String(man.background_color).toLowerCase() === "#04212b", man.theme_color + " " + man.background_color);
@@ -100,11 +107,11 @@ ok("Static maskable icoon vervangen", (await bytes("/static/icons/maskable_icon-
   const apple = fs.readFileSync(path.join(COMP, "app-icon-apple-180.png"));
   const link = (index.match(/rel="apple-touch-icon"[^>]*href="([^"]+)"|href="([^"]+)"[^>]*rel="apple-touch-icon"/) || []);
   const href = link[1] || link[2] || "";
-  ok("iPhone: apple-touch-icon is het iOS-icoon", /^\/btechnics_branding\/app-icon-apple-180\.png\?v=1\.53\.0$/.test(href) && (await bytes(href)).equals(apple), href);
+  ok("iPhone: apple-touch-icon is het iOS-icoon", /^\/btechnics_branding\/app-icon-apple-180\.png\?v=1\.54\.0$/.test(href) && (await bytes(href)).equals(apple), href);
   ok("iPhone: oud HA-adres geeft ook het iOS-icoon", (await bytes("/static/icons/favicon-apple-180x180.png")).equals(apple));
   ok("Safari: geen mask-icon meer in de HTML, oud adres geeft het app-icoon", !/rel="mask-icon"/.test(index) && (await bytes("/static/icons/mask-icon.svg")).equals(fs.readFileSync(path.join(COMP, "app-icon.svg"))));
   const lsvg = fs.readFileSync(path.join(COMP, "logo.svg"));
-  ok("v1.52.0: logo altijd licht, geen donkere versie", (await bytes("/btechnics_branding/logo.svg?v=1.53.0")).equals(lsvg) && !/prefers-color-scheme/.test(lsvg.toString()) && !fs.existsSync(path.join(COMP, "logo-dark.svg")) && fs.readFileSync(path.join(COMP, "brand/dark_logo.png")).equals(fs.readFileSync(path.join(COMP, "brand/logo.png"))));
+  ok("v1.52.0: logo altijd licht, geen donkere versie", (await bytes("/btechnics_branding/logo.svg?v=1.54.0")).equals(lsvg) && !/prefers-color-scheme/.test(lsvg.toString()) && !fs.existsSync(path.join(COMP, "logo-dark.svg")) && fs.readFileSync(path.join(COMP, "brand/dark_logo.png")).equals(fs.readFileSync(path.join(COMP, "brand/logo.png"))));
   ok("Index: theme-color petrol #04212b", /name="theme-color" content="#04212b"/i.test(index), (index.match(/name="theme-color"[^>]*/) || [""])[0]);
 }
 // v1.52.0: altijd licht, ook op een toestel in donkere modus
@@ -232,10 +239,10 @@ const ui = await page.evaluate(async () => {
 ok("UI: titel", ui.title.includes("Btechnics IOT"), ui.title);
 ok("UI: logo in zijbalk", ui.sidebarLogo);
 // v1.52.0: de JS mag de apple-touch-icon niet weghalen; zijbalk volgt het thema
-ok("UI 1.51: apple-touch-icon blijft in de pagina", /^\/btechnics_branding\/app-icon-apple-180\.png\?v=1\.53\.0$/.test(ui.appleLink), ui.appleLink);
+ok("UI 1.51: apple-touch-icon blijft in de pagina", /^\/btechnics_branding\/app-icon-apple-180\.png\?v=1\.54\.0$/.test(ui.appleLink), ui.appleLink);
 ok("UI 1.51: favicon enkel het Btechnics icoon", ui.iconLinks.length >= 1 && ui.iconLinks.every((h) => /^\/btechnics_branding\//.test(h)), JSON.stringify(ui.iconLinks));
 // v1.53.0: petrol zijbalkkop met het btechnics.be logo met baseline (witte tekst), petrol bovenbalk
-ok("UI 1.53.0: zijbalklogo met baseline", ui.sidebarLogoSrc === "/btechnics_branding/logo-zijbalk.svg?v=1.53.0" && (await bytes(ui.sidebarLogoSrc)).equals(fs.readFileSync(path.join(COMP, "logo-zijbalk.svg"))), JSON.stringify({ src: ui.sidebarLogoSrc, dark: ui.dark }));
+ok("UI 1.53.0: zijbalklogo met baseline", ui.sidebarLogoSrc === "/btechnics_branding/logo-zijbalk.svg?v=1.54.0" && (await bytes(ui.sidebarLogoSrc)).equals(fs.readFileSync(path.join(COMP, "logo-zijbalk.svg"))), JSON.stringify({ src: ui.sidebarLogoSrc, dark: ui.dark }));
 ok("UI 1.53.0: zijbalkkop en bovenbalk petrol", ui.menuBg === "rgb(4, 33, 43)" && ui.headerBg === "#04212B", JSON.stringify({ menu: ui.menuBg, header: ui.headerBg }));
 // v1.52.0: toestel in donkere modus, en een gebruiker die zelf donker kiest: toch licht
 {
@@ -404,7 +411,7 @@ ok("Index 1.53.0: geen banner voor de Home Assistant iOS-app", !/apple-itunes-ap
   await lp.goto(BASE + "/auth/authorize?response_type=code&client_id=" + encodeURIComponent(CLIENT_ID) + "&redirect_uri=" + encodeURIComponent(CLIENT_ID));
   await sleep(6000);
   const src = await lp.evaluate(() => document.querySelector(".content > .header img")?.getAttribute("src") || "");
-  ok("Aanmeldscherm 1.53.0: btechnics.be logo", src === "/btechnics_branding/logo.svg?v=1.53.0", src);
+  ok("Aanmeldscherm 1.53.0: btechnics.be logo", src === "/btechnics_branding/logo.svg?v=1.54.0", src);
   await c.close();
 }
 
@@ -662,13 +669,13 @@ ok("Index 1.53.0: geen banner voor de Home Assistant iOS-app", !/apple-itunes-ap
   // v1.33.1: https verplicht (behalve lokaal adres)
   const fout = await setOpts({ ...ALLES, status_url: "http://work.btechnics.be/api/iot/status", status_token: "testsleutel" });
   ok("Status: http naar buiten geweigerd", fout.f.type === "form" && fout.f.errors && fout.f.errors.status_url === "status_url_https", JSON.stringify(fout.f.errors));
-  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.53.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
+  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.54.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
   {
     const sw = b.software || [];
     const own = sw.find((x) => x.kind === "custom" && x.domain === "btechnics_branding");
     const hacs = sw.find((x) => x.entity_id === "update.test_hacs_integratie");
     const fw = sw.find((x) => x.entity_id === "update.test_faalt");
-    ok("Status: softwarelijst met alle versies (v1.45.0)", !!own && own.installed === "1.53.0" && !!hacs && hacs.kind === "hacs" && hacs.installed === "v1.0.0" && hacs.up_to_date === true && !!fw && fw.up_to_date === false && fw.latest === "2.0.0", JSON.stringify(sw.map((x) => `${x.kind}:${x.name}=${x.installed}${x.up_to_date === false ? "->" + x.latest : ""}`)));
+    ok("Status: softwarelijst met alle versies (v1.45.0)", !!own && own.installed === "1.54.0" && !!hacs && hacs.kind === "hacs" && hacs.installed === "v1.0.0" && hacs.up_to_date === true && !!fw && fw.up_to_date === false && fw.latest === "2.0.0", JSON.stringify(sw.map((x) => `${x.kind}:${x.name}=${x.installed}${x.up_to_date === false ? "->" + x.latest : ""}`)));
   }
   ok("Status: geen sleutel in het bericht", !JSON.stringify(b).includes("testsleutel"));
   {
@@ -775,6 +782,12 @@ ok("Index 1.53.0: geen banner voor de Home Assistant iOS-app", !/apple-itunes-ap
   const diag = await (await fetch(BASE + "/api/diagnostics/config_entry/" + entry.entry_id, { headers: H })).json();
   ok("Diagnose: te downloaden", !!(diag && diag.data && diag.data.automatische_updates), Object.keys((diag && diag.data) || {}).join(","));
   ok("Diagnose: sleutel afgeschermd", !JSON.stringify(diag).includes("testsleutel"));
+  {
+    // v1.54.0: geen IP-adressen, computernamen, deuren, rollen of locatienaam in de diagnose
+    const ber = ((diag && diag.data && diag.data.status_naar_btechnics) || {}).bericht || {};
+    const tekst = JSON.stringify(ber);
+    ok("Diagnose 1.54.0: geen IP, computernaam, rollen of locatie", Object.keys(ber).length > 0 && !/laatste_ip|computernaam/.test(tekst) && (ber.desktop_apps === null || typeof ber.desktop_apps === "string") && [undefined, null, "**REDACTED**"].includes(ber.rollen) && [null, "**REDACTED**"].includes(ber.name), JSON.stringify({ apps: ber.desktop_apps, rollen: ber.rollen, name: ber.name, keys: Object.keys(ber) }));
+  }
 
   // v1.35.0: meldingenlog in de status
   const metLogs = ontvangen.filter((x) => x.body.logs).pop();
@@ -1105,6 +1118,17 @@ ok("Index 1.53.0: geen banner voor de Home Assistant iOS-app", !/apple-itunes-ap
     ]);
     const na = rd("btechnics_roles") || {};
     ok("Rollen: verwijderde gebruiker ook uit de rollen", U.rol13 && U.rol13.ok && !(na.admin || []).includes(ine.id) && U.rol15 && U.rol15.ok && Object.keys(na.dashboards || {}).length === 0, JSON.stringify(na));
+    // v1.54.0: een medewerker met een verborgen dashboard, voor de test bij het verwijderen van de integratie
+    U = await batch([{ id: "rolw1", type: "create_user", name: "Rol Weg", username: "rolweg", admin: false }]);
+    const rw = U.rolw1 && U.rolw1.ok ? U.rolw1.result : null;
+    if (rw) {
+      U = await batch([
+        { id: "rolw2", type: "set_role", user_id: rw.id, role: "medewerker" },
+        { id: "rolw3", type: "set_dashboards", dashboards: { map: ["admin"] } },
+      ]);
+      await sleep(1500);
+    }
+    ok("Rollen 1.54.0: medewerker klaar voor de verwijdertest", !!rw && (side(rw.id) || []).includes("map"), JSON.stringify({ rw: rw && rw.id, side: rw && side(rw.id) }));
   }
   const sm = (await (await fetch(BASE + "/api/services/btechnics_branding/send_status?return_response", { method: "POST", headers: H, body: "{}" })).json()).service_response.bericht;
   ok("Gebruikers: klant ziet een melding in HA", (sm.logs.notifications || []).some((n) => /gebruikersbeheer/i.test(n.title)), (sm.logs.notifications || []).map((n) => n.title).join(","));
@@ -1218,8 +1242,19 @@ ok("Index 1.53.0: geen banner voor de Home Assistant iOS-app", !/apple-itunes-ap
   const hadStore = fs.existsSync(store);
   fs.mkdirSync(logoDir, { recursive: true });
   fs.writeFileSync(path.join(logoDir, "customer_logo.png"), fs.readFileSync(path.join(COMP, "app-icon-192.png")));
+  // v1.54.0: welke panelen verbergen wij nu per gebruiker (rollen)
+  const rdS = (f) => { const r = spawnSync("docker", ["exec", "bt-ha", "cat", "/config/.storage/" + f], { encoding: "utf8" }); try { return JSON.parse(r.stdout).data; } catch { return null; } };
+  const onzeVoor = ((rdS("btechnics_roles") || {}).verborgen) || {};
   const del = await fetch(BASE + "/api/config/config_entries/entry/" + entry.entry_id, { method: "DELETE", headers: H });
   await sleep(6000);
+  {
+    const rollenNa = rdS("btechnics_roles") || {};
+    const nogVerborgen = Object.entries(onzeVoor).filter(([uid, ps]) => {
+      const h = ((rdS("frontend.user_data_" + uid) || {}).sidebar || {}).hiddenPanels || [];
+      return ps.some((p) => h.includes(p));
+    });
+    ok("Verwijderen 1.54.0: dashboards die wij per rol verborgen, komen terug; rollen blijven", Object.keys(onzeVoor).length > 0 && nogVerborgen.length === 0 && Object.keys(rollenNa.verborgen || {}).length === 0 && (rollenNa.medewerker || []).length > 0, JSON.stringify({ voor: onzeVoor, nog: nogVerborgen, na: Object.keys(rollenNa) }));
+  }
   ok("Verwijderen: integratie weg", del.status === 200, String(del.status));
   ok("Verwijderen: tellingen opgeruimd", hadStore && !fs.existsSync(store), `voor ${hadStore} na ${fs.existsSync(store)}`);
   ok("Verwijderen: klantenlogo opgeruimd", !fs.existsSync(logoDir) || fs.readdirSync(logoDir).length === 0, fs.existsSync(logoDir) ? fs.readdirSync(logoDir).join(",") : "weg");
