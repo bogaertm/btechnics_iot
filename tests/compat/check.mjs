@@ -7,6 +7,8 @@ import path from "node:path";
 import { chromium } from "playwright";
 
 const BASE = process.env.HA_URL || "http://localhost:8123";
+// v1.55.0: "hacs" tot HA 2026.10, "marketplace" vanaf 2026.11 (zie run.sh)
+const STORE = process.env.BT_STORE || "hacs";
 const CLIENT_ID = BASE + "/";
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), "../..");
 const COMP = path.join(ROOT, "custom_components/btechnics_branding");
@@ -83,7 +85,7 @@ ok("Manifest 1.53.0: PWA, geen HA-app", man.prefer_related_applications === fals
   const ic = man.icons || [];
   const any = ic.filter((i) => i.purpose === "any").map((i) => i.sizes).sort().join();
   const mask = ic.filter((i) => i.purpose === "maskable").map((i) => i.sizes).sort().join();
-  ok("Manifest 1.51: any en maskable 192 en 512", any === "192x192,512x512" && mask === "192x192,512x512" && ic.every((i) => /\?v=1\.54\.0$/.test(i.src)), JSON.stringify(ic));
+  ok("Manifest 1.51: any en maskable 192 en 512", any === "192x192,512x512" && mask === "192x192,512x512" && ic.every((i) => /\?v=1\.55\.0$/.test(i.src)), JSON.stringify(ic));
   const m512 = ic.find((i) => i.purpose === "maskable" && i.sizes === "512x512");
   ok("Manifest 1.51: maskable bestand klopt", !!m512 && (await bytes(m512.src)).equals(fs.readFileSync(path.join(COMP, "app-icon-maskable-512.png"))));
   ok("Manifest 1.51: themakleur petrol #04212b", String(man.theme_color).toLowerCase() === "#04212b" && String(man.background_color).toLowerCase() === "#04212b", man.theme_color + " " + man.background_color);
@@ -107,11 +109,11 @@ ok("Static maskable icoon vervangen", (await bytes("/static/icons/maskable_icon-
   const apple = fs.readFileSync(path.join(COMP, "app-icon-apple-180.png"));
   const link = (index.match(/rel="apple-touch-icon"[^>]*href="([^"]+)"|href="([^"]+)"[^>]*rel="apple-touch-icon"/) || []);
   const href = link[1] || link[2] || "";
-  ok("iPhone: apple-touch-icon is het iOS-icoon", /^\/btechnics_branding\/app-icon-apple-180\.png\?v=1\.54\.0$/.test(href) && (await bytes(href)).equals(apple), href);
+  ok("iPhone: apple-touch-icon is het iOS-icoon", /^\/btechnics_branding\/app-icon-apple-180\.png\?v=1\.55\.0$/.test(href) && (await bytes(href)).equals(apple), href);
   ok("iPhone: oud HA-adres geeft ook het iOS-icoon", (await bytes("/static/icons/favicon-apple-180x180.png")).equals(apple));
   ok("Safari: geen mask-icon meer in de HTML, oud adres geeft het app-icoon", !/rel="mask-icon"/.test(index) && (await bytes("/static/icons/mask-icon.svg")).equals(fs.readFileSync(path.join(COMP, "app-icon.svg"))));
   const lsvg = fs.readFileSync(path.join(COMP, "logo.svg"));
-  ok("v1.52.0: logo altijd licht, geen donkere versie", (await bytes("/btechnics_branding/logo.svg?v=1.54.0")).equals(lsvg) && !/prefers-color-scheme/.test(lsvg.toString()) && !fs.existsSync(path.join(COMP, "logo-dark.svg")) && fs.readFileSync(path.join(COMP, "brand/dark_logo.png")).equals(fs.readFileSync(path.join(COMP, "brand/logo.png"))));
+  ok("v1.52.0: logo altijd licht, geen donkere versie", (await bytes("/btechnics_branding/logo.svg?v=1.55.0")).equals(lsvg) && !/prefers-color-scheme/.test(lsvg.toString()) && !fs.existsSync(path.join(COMP, "logo-dark.svg")) && fs.readFileSync(path.join(COMP, "brand/dark_logo.png")).equals(fs.readFileSync(path.join(COMP, "brand/logo.png"))));
   ok("Index: theme-color petrol #04212b", /name="theme-color" content="#04212b"/i.test(index), (index.match(/name="theme-color"[^>]*/) || [""])[0]);
 }
 // v1.52.0: altijd licht, ook op een toestel in donkere modus
@@ -157,7 +159,7 @@ if (where) {
     ["frontend_latest", "frontend/set_system_data", "enquete opslag"],
     ["frontend_latest", "cloud-discover", "cloud promo"],
     ["frontend_latest", "ha-tip", "tip balk"],
-    ["frontend_latest", "/api/brands/integration/", "brands API"],
+    ["frontend_latest", "/api/brands/", "brands API"], // 2026.11: /api/brands/${e}/${s}
   ];
   for (const [sub, n, label] of needles) ok("Frontend bevat: " + label, grep(n, sub), n);
 } else {
@@ -239,10 +241,10 @@ const ui = await page.evaluate(async () => {
 ok("UI: titel", ui.title.includes("Btechnics IOT"), ui.title);
 ok("UI: logo in zijbalk", ui.sidebarLogo);
 // v1.52.0: de JS mag de apple-touch-icon niet weghalen; zijbalk volgt het thema
-ok("UI 1.51: apple-touch-icon blijft in de pagina", /^\/btechnics_branding\/app-icon-apple-180\.png\?v=1\.54\.0$/.test(ui.appleLink), ui.appleLink);
+ok("UI 1.51: apple-touch-icon blijft in de pagina", /^\/btechnics_branding\/app-icon-apple-180\.png\?v=1\.55\.0$/.test(ui.appleLink), ui.appleLink);
 ok("UI 1.51: favicon enkel het Btechnics icoon", ui.iconLinks.length >= 1 && ui.iconLinks.every((h) => /^\/btechnics_branding\//.test(h)), JSON.stringify(ui.iconLinks));
 // v1.53.0: petrol zijbalkkop met het btechnics.be logo met baseline (witte tekst), petrol bovenbalk
-ok("UI 1.53.0: zijbalklogo met baseline", ui.sidebarLogoSrc === "/btechnics_branding/logo-zijbalk.svg?v=1.54.0" && (await bytes(ui.sidebarLogoSrc)).equals(fs.readFileSync(path.join(COMP, "logo-zijbalk.svg"))), JSON.stringify({ src: ui.sidebarLogoSrc, dark: ui.dark }));
+ok("UI 1.53.0: zijbalklogo met baseline", ui.sidebarLogoSrc === "/btechnics_branding/logo-zijbalk.svg?v=1.55.0" && (await bytes(ui.sidebarLogoSrc)).equals(fs.readFileSync(path.join(COMP, "logo-zijbalk.svg"))), JSON.stringify({ src: ui.sidebarLogoSrc, dark: ui.dark }));
 ok("UI 1.53.0: zijbalkkop en bovenbalk petrol", ui.menuBg === "rgb(4, 33, 43)" && ui.headerBg === "#04212B", JSON.stringify({ menu: ui.menuBg, header: ui.headerBg }));
 // v1.52.0: toestel in donkere modus, en een gebruiker die zelf donker kiest: toch licht
 {
@@ -252,14 +254,21 @@ ok("UI 1.53.0: zijbalkkop en bovenbalk petrol", ui.menuBg === "rgb(4, 33, 43)" &
   await dp.goto(BASE + "/config/dashboard"); await sleep(1500);
   const bgStart = await dp.evaluate(() => getComputedStyle(document.documentElement).backgroundColor);
   // wachten tot HA geladen is (2026.9.4 is trager), max 40 s
-  await dp.waitForFunction(() => document.querySelector("home-assistant")?.hass?.themes !== undefined, null, { timeout: 40000 }).catch(() => {});
+  // v1.55.0: HA herlaadt de pagina een keer in een vers profiel (service worker);
+  // waitForFunction brak dan af en de test las tijdens het herladen. Zelf peilen.
+  for (let i = 0; i < 30; i++) {
+    const v = await dp.evaluate(() => document.querySelector("home-assistant")?.hass?.themes?.darkMode).catch(() => undefined);
+    if (v !== undefined) break;
+    await sleep(3000);
+  }
   await sleep(4000);
   const lees = () => dp.evaluate(() => ({
     dark: document.querySelector("home-assistant")?.hass?.themes?.darkMode,
     mm: window.matchMedia("(prefers-color-scheme: dark)").matches,
     bg: getComputedStyle(document.documentElement).getPropertyValue("--primary-background-color").trim(),
   }));
-  const d1 = await lees();
+  let d1 = await lees().catch(() => ({}));
+  if (d1.dark === undefined) { await sleep(5000); d1 = await lees().catch(() => ({})); }
   ok("Altijd licht: donker toestel krijgt licht thema", d1.dark === false && d1.mm === false && /^#f/i.test(d1.bg) && !/rgb\(1[0-9], 1[0-9], 1[0-9]\)/.test(bgStart), JSON.stringify({ ...d1, bgStart }));
   await dp.evaluate(() => document.querySelector("home-assistant").dispatchEvent(new CustomEvent("settheme", { detail: { dark: true }, bubbles: true, composed: true })));
   await sleep(6000);
@@ -384,8 +393,11 @@ ok("Zelfcontrole vraagt aanmelding", anon.status === 401, String(anon.status));
     const mc = await browser.newContext({ ...dev });
     await mc.addInitScript((t) => { localStorage.setItem("hassTokens", JSON.stringify(t)); }, stored);
     const mp = await mc.newPage();
-    await mp.goto(BASE + "/btechnics-app"); await sleep(14000);
-    const z = await zichtbaar(mp);
+    await mp.goto(BASE + "/btechnics-app"); await sleep(8000);
+    // v1.55.0: op een trage machine is de pagina na 14 s soms nog niet klaar; tot 60 s peilen
+    let z = null;
+    for (let i = 0; i < 20 && !(z && z.length); i++) { z = await zichtbaar(mp).catch(() => null); if (!(z && z.length)) await sleep(3000); }
+    await sleep(2000);
     ok("App 1.53.0: " + naam + " ziet de installatiestappen", JSON.stringify(z) === JSON.stringify([sec]), JSON.stringify(z));
     const kleur = await opnieuw(() => mp.evaluate(() => {
       const out = []; const walk = (r) => { for (const el of r.querySelectorAll("*")) { if (el.tagName === "HA-MENU-BUTTON" || el.tagName === "HA-ICON-BUTTON-ARROW-PREV") out.push(getComputedStyle(el).color); if (el.shadowRoot) walk(el.shadowRoot); } };
@@ -411,7 +423,7 @@ ok("Index 1.53.0: geen banner voor de Home Assistant iOS-app", !/apple-itunes-ap
   await lp.goto(BASE + "/auth/authorize?response_type=code&client_id=" + encodeURIComponent(CLIENT_ID) + "&redirect_uri=" + encodeURIComponent(CLIENT_ID));
   await sleep(6000);
   const src = await lp.evaluate(() => document.querySelector(".content > .header img")?.getAttribute("src") || "");
-  ok("Aanmeldscherm 1.53.0: btechnics.be logo", src === "/btechnics_branding/logo.svg?v=1.54.0", src);
+  ok("Aanmeldscherm 1.53.0: btechnics.be logo", src === "/btechnics_branding/logo.svg?v=1.55.0", src);
   await c.close();
 }
 
@@ -526,6 +538,16 @@ ok("Index 1.53.0: geen banner voor de Home Assistant iOS-app", !/apple-itunes-ap
   ok("Run 1: test_ok weer gewoon zichtbaar (niets meer open)", (await reg("update.test_ok")).hidden_by === null);
   ok("Run 1: test_faalt nog verborgen na 1 poging", (await reg("update.test_faalt")).hidden_by === "integration");
   ok("Run 1: nog geen melding", !(await issues()).some((i) => i.startsWith("update_failed_")));
+  {
+    // v1.55.0: per update de uitkomst met reden, en de foutreden in de status
+    const ber = (await (await fetch(BASE + "/api/services/btechnics_branding/send_status?return_response", { method: "POST", headers: H, body: "{}" })).json()).service_response.bericht;
+    const det = ((ber.auto_update || {}).last_run || {}).details || [];
+    const faalt = det.find((d) => d.entity_id === "update.test_faalt");
+    const okd = det.find((d) => d.entity_id === "update.test_ok");
+    const pend = (((ber.updates || {}).pending) || []).find((u) => u.entity_id === "update.test_faalt");
+    ok("Run 1.55.0: uitkomst en reden per update", !!faalt && faalt.uitkomst === "mislukt" && !!faalt.reden && !!okd && okd.uitkomst === "geinstalleerd" && Array.isArray(ber.offline_devices), JSON.stringify({ det, keys: Object.keys(ber) }));
+    ok("Run 1.55.0: foutreden bij de openstaande update", !!pend && !!pend.error, JSON.stringify(pend));
+  }
 
   // v1.32.1: even unavailable (opstarten, herstart) mag de telling niet wissen
   await fetch(BASE + "/api/states/update.test_faalt", { method: "POST", headers: H, body: JSON.stringify({ state: "unavailable" }) });
@@ -669,13 +691,13 @@ ok("Index 1.53.0: geen banner voor de Home Assistant iOS-app", !/apple-itunes-ap
   // v1.33.1: https verplicht (behalve lokaal adres)
   const fout = await setOpts({ ...ALLES, status_url: "http://work.btechnics.be/api/iot/status", status_token: "testsleutel" });
   ok("Status: http naar buiten geweigerd", fout.f.type === "form" && fout.f.errors && fout.f.errors.status_url === "status_url_https", JSON.stringify(fout.f.errors));
-  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.54.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
+  ok("Status: inhoud", !!b.instance_id && !!b.versions && b.versions.integration === "1.55.0" && Array.isArray(b.updates.failed) && b.updates.failed.some((u) => u.entity_id === "update.test_faalt") && b.auto_update.enabled === true, JSON.stringify({ id: b.instance_id, v: b.versions, failed: b.updates && b.updates.failed.map((u) => u.entity_id) }));
   {
     const sw = b.software || [];
     const own = sw.find((x) => x.kind === "custom" && x.domain === "btechnics_branding");
     const hacs = sw.find((x) => x.entity_id === "update.test_hacs_integratie");
     const fw = sw.find((x) => x.entity_id === "update.test_faalt");
-    ok("Status: softwarelijst met alle versies (v1.45.0)", !!own && own.installed === "1.54.0" && !!hacs && hacs.kind === "hacs" && hacs.installed === "v1.0.0" && hacs.up_to_date === true && !!fw && fw.up_to_date === false && fw.latest === "2.0.0", JSON.stringify(sw.map((x) => `${x.kind}:${x.name}=${x.installed}${x.up_to_date === false ? "->" + x.latest : ""}`)));
+    ok("Status: softwarelijst met alle versies (v1.45.0)", !!own && own.installed === "1.55.0" && !!hacs && hacs.kind === "hacs" && hacs.installed === "v1.0.0" && hacs.up_to_date === true && !!fw && fw.up_to_date === false && fw.latest === "2.0.0", JSON.stringify(sw.map((x) => `${x.kind}:${x.name}=${x.installed}${x.up_to_date === false ? "->" + x.latest : ""}`)));
   }
   ok("Status: geen sleutel in het bericht", !JSON.stringify(b).includes("testsleutel"));
   {
@@ -711,10 +733,11 @@ ok("Index 1.53.0: geen banner voor de Home Assistant iOS-app", !/apple-itunes-ap
   ok("Op afstand: status meteen bijgewerkt", naOpAfstand.length > 0 && naOpAfstand[naOpAfstand.length - 1].body.auto_update.time === "05:30:00", JSON.stringify(naOpAfstand.map((x) => x.body.reason)));
 
   // v1.47.0: HACS ververst eigen (custom) repositories maar om de 48 uur; wij vragen het zelf
-  {
-    const teller = async () => (await (await fetch(BASE + "/api/services/hacs/test_teller?return_response", { method: "POST", headers: H, body: "{}" })).json()).service_response.refreshes;
+  // v1.55.0: de Marktplaats (HA 2026.11) ververst zelf, daar niet van toepassing
+  if (STORE === "hacs") {
+    const teller = async () => (await (await fetch(BASE + `/api/services/${STORE}/test_` + "teller?return_response", { method: "POST", headers: H, body: "{}" })).json()).service_response.refreshes;
     const voor = await teller();
-    await fetch(BASE + "/api/services/hacs/test_bij_verversen", { method: "POST", headers: H, body: "{}" });
+    await fetch(BASE + `/api/services/${STORE}/test_` + "bij_verversen", { method: "POST", headers: H, body: "{}" });
     const d = (await (await fetch(BASE + "/api/services/btechnics_branding/run_updates?return_response", { method: "POST", headers: H, body: JSON.stringify({ dry_run: true }) })).json()).service_response || {};
     const na = await teller();
     ok("HACS: custom repository ververst voor het plan (enkel custom, niet default)", na - voor === 1, `${voor} -> ${na}`);
@@ -728,7 +751,7 @@ ok("Index 1.53.0: geen banner voor de Home Assistant iOS-app", !/apple-itunes-ap
     const tz = n === 0 ? "Etc/GMT" : `Etc/GMT${n > 0 ? "-" : "+"}${Math.abs(n)}`;
     await ws({ type: "config/core/update", time_zone: tz });
     await sleep(1000);
-    await fetch(BASE + "/api/services/hacs/test_nieuwe_versie", { method: "POST", headers: H, body: "{}" });
+    await fetch(BASE + `/api/services/${STORE}/test_` + "nieuwe_versie", { method: "POST", headers: H, body: "{}" });
     await sleep(1500);
     wachtrij.push({ id: "h1", type: "install_update", entity_id: "update.test_hacs_integratie" });
     for (let i = 0; i < 20 && !resultaten.some((x) => x.id === "h1"); i++) await sleep(3000);

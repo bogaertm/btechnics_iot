@@ -153,8 +153,16 @@ def _live_tokens(hass: HomeAssistant) -> dict[str, dict[str, Any]]:
                 continue
             info: dict[str, Any] = {"ip": None}
             for cb in list(cbs):
-                request = getattr(getattr(cb, "__self__", None), "_request", None)
+                owner = getattr(cb, "__self__", None)
+                request = getattr(owner, "_request", None)
                 if request is None:
+                    # v1.55.0: vanaf HA 2026.11 is de callback ActiveConnection.async_auth_revoked;
+                    # de request zit dan bij de WebSocket-handler achter _cancel_ws
+                    request = getattr(getattr(getattr(owner, "_cancel_ws", None), "__self__", None),
+                                      "_request", None)
+                if request is None:
+                    if not info["ip"] and getattr(owner, "remote", None):
+                        info["ip"] = str(owner.remote)[:60]
                     continue
                 if not info["ip"] and getattr(request, "remote", None):
                     info["ip"] = str(request.remote)[:60]

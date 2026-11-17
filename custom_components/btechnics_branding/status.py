@@ -232,6 +232,8 @@ async def async_build(hass: HomeAssistant, options: dict, reason: str) -> dict[s
             "attempts": attempts,
             # v1.48.3: tijdens poging 2 nog niet mislukt
             "failed": attempts >= auto_update.MAX_ATTEMPTS and not auto_update.is_installing(hass, st.entity_id),
+            # v1.55.0: waarom de laatste poging mislukte
+            "error": (_clean(tracker.error(st.entity_id, latest)) or None) if tracker and attempts else None,
         })
 
     # v1.45.0: volledige softwarelijst (ook wat up-to-date is): HA zelf, OS,
@@ -248,6 +250,43 @@ async def async_build(hass: HomeAssistant, options: dict, reason: str) -> dict[s
             "up_to_date": st.state == "off",
             "available": st.state not in ("unavailable", "unknown"),
         })
+    # v1.55.0: een update-entiteit die niet beschikbaar is: staat het toestel zelf uit
+    # (alle entiteiten van dat toestel onbeschikbaar), of is er gewoon geen OTA-info?
+    offline_devices: list[dict] = []
+    no_ota: list[str] = []
+    try:
+        from homeassistant.helpers import device_registry as dr
+        dreg = dr.async_get(hass)
+        seen_dev: set[str] = set()
+        for st in hass.states.async_all("update"):
+            if st.state not in ("unavailable", "unknown"):
+                continue
+            entry = reg.async_get(st.entity_id)
+            dev_id = entry.device_id if entry else None
+            if not dev_id:
+                no_ota.append(st.entity_id)
+                continue
+            if dev_id in seen_dev:
+                # review 1.55.0: tweede update van hetzelfde toestel ook meetellen
+                if not any(d.get("entity_id") and reg.async_get(d["entity_id"]) and
+                           reg.async_get(d["entity_id"]).device_id == dev_id for d in offline_devices):
+                    no_ota.append(st.entity_id)
+                continue
+            seen_dev.add(dev_id)
+            others = [e.entity_id for e in er.async_entries_for_device(reg, dev_id)
+                      if e.entity_id != st.entity_id and not e.disabled_by]
+            states = [hass.states.get(e) for e in others]
+            states = [x for x in states if x is not None]
+            if states and all(x.state in ("unavailable", "unknown") for x in states):
+                dev = dreg.async_get(dev_id)
+                offline_devices.append({
+                    "name": _safe((dev.name_by_user or dev.name) if dev else st.entity_id),
+                    "entity_id": st.entity_id,
+                })
+            else:
+                no_ota.append(st.entity_id)
+    except Exception:  # noqa: BLE001
+        pass
     # Eigen integraties (custom_components) met de versie uit hun manifest. Wie via
     # HACS komt, staat ook hierboven als "hacs"; hier gaat het om de code die draait.
     try:
@@ -333,6 +372,10 @@ async def async_build(hass: HomeAssistant, options: dict, reason: str) -> dict[s
             "restart_planned": auto_update.deferred_restart(hass),
         },
         "software": software,
+        # v1.55.0: toestellen die offline zijn (alle entiteiten onbeschikbaar) en
+        # update-entiteiten die enkel geen OTA-info hebben (toestel werkt wel)
+        "offline_devices": offline_devices,
+        "updates_without_ota": len(no_ota),
         "updates": {
             "pending": pending,
             "failed": [p for p in pending if p["failed"]],

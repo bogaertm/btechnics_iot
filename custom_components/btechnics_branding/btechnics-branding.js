@@ -36,7 +36,7 @@
 const BRAND = "Btechnics IOT";
 // v1.51.0: bovenaan, want BT gebruikt de versie in de adressen. Iconen en logo staan
 // 31 dagen in de cache (cache_headers van HA); een nieuwe versie geeft een nieuw adres.
-const BT_VERSION = "1.54.0";
+const BT_VERSION = "1.55.0";
 
 const BT = {
   logo: "/btechnics_branding/logo.svg?v=" + BT_VERSION,

@@ -96,4 +96,32 @@ check("tonen: Core beta", not au._managed(s3[0], "core", ON))
 check("tonen: firmware zonder vinkje", not au._managed(STATES[5], "firmware", ON))
 check("tonen: automatische updates uit", not au._managed(STATES[3], "addon", {**ON, "auto_update": False}))
 
+# v1.55.0: HA 2026.11 Marktplaats neemt HACS over (platform "marketplace")
+ENTRIES["update.btechnics_iot_update"] = Entry("marketplace", "999")
+mp = [State("update.btechnics_iot_update", "v1.55.0", "v1.50.1", title="Btechnics IOT Features", feat=1)]
+check("Marktplaats: soort hacs", au._kind(ENTRIES["update.btechnics_iot_update"]) == "hacs")
+todo, skipped = run(mp, {"auto_update_categories": ["system", "addons", "hacs"]})
+check("Marktplaats: gaat mee met hacs", [u["name"] for u in todo] == ["Btechnics IOT Features"], str(todo))
+todo, skipped = run(mp, {"auto_update_categories": ["system"]})
+check("Marktplaats: niet zonder vinkje hacs", todo == [], str(todo))
+
+
+def run_mp(states, options, accepted):
+    entry = types.SimpleNamespace(runtime_data=types.SimpleNamespace(warning_acceptances={"u": 1} if accepted else {}))
+    hass = types.SimpleNamespace(data={}, states=types.SimpleNamespace(async_all=lambda d: states),
+                                 config_entries=types.SimpleNamespace(async_entries=lambda d: [entry] if d == "marketplace" else []))
+    det = []
+    with patch.object(au.er, "async_get", lambda h: Reg()):
+        return au.plan(hass, options, det), det
+
+
+(todo, skipped), det = run_mp(mp, {"auto_update_categories": ["hacs"]}, accepted=False)
+check("Marktplaats: waarschuwing niet aanvaard, met reden overgeslagen",
+      todo == [] and det and det[0]["uitkomst"] == "overgeslagen" and "waarschuwing" in det[0]["reden"], str(det))
+(todo, skipped), det = run_mp(mp, {"auto_update_categories": ["hacs"]}, accepted=True)
+check("Marktplaats: aanvaard, dan installeren", len(todo) == 1, str(todo))
+(todo, skipped), det = run_mp(STATES, {"auto_update_categories": ["system"]}, accepted=True)
+check("Details: reden per overgeslagen of niet automatische update",
+      all(d.get("reden") for d in det) and any(d["uitkomst"] == "niet_automatisch" for d in det), str(det[:3]))
+
 sys.exit(1 if fails else 0)

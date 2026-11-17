@@ -90,7 +90,9 @@ def _kind(entry: er.RegistryEntry | None) -> str:
         if uid.startswith("home_assistant_supervisor_"):
             return "supervisor"
         return "addon"
-    if entry.platform == "hacs":
+    # v1.55.0: sinds HA 2026.11 neemt de ingebouwde Marktplaats HACS over; de
+    # update-entiteiten hangen dan onder het platform "marketplace"
+    if entry.platform in ("hacs", "marketplace"):
         return "hacs"
     return "firmware"
 
@@ -341,17 +343,35 @@ class Tracker:
         self.attempts: dict[str, dict] = {}
         self.hidden: set[str] = set()
         self.seen: dict[str, dict] = {}
+        self.last_run: dict | None = None
 
     async def async_load(self) -> None:
         data = await self._store.async_load() or {}
         self.attempts = data.get("attempts", {})
         self.hidden = set(data.get("hidden", []))
         self.seen = data.get("seen", {})
+        self.last_run = data.get("last_run")
 
     def _save(self) -> None:
         self._store.async_delay_save(
-            lambda: {"attempts": self.attempts, "hidden": sorted(self.hidden), "seen": self.seen}, 2
+            lambda: {"attempts": self.attempts, "hidden": sorted(self.hidden), "seen": self.seen,
+                     "last_run": self.last_run}, 2
         )
+
+    def save_last_run(self, result: dict) -> None:
+        """v1.55.0: de laatste run overleeft een herstart (Core-update om 04:00)."""
+        self.last_run = result
+        self._save()
+
+    def set_error(self, entity_id: str, reason: str) -> None:
+        """v1.55.0: waarom de laatste poging mislukte, voor de Work-app."""
+        if (rec := self.attempts.get(entity_id)) is not None:
+            rec["fout"] = str(reason)[:300]
+            self._save()
+
+    def error(self, entity_id: str, version: str | None) -> str | None:
+        a = self.attempts.get(entity_id)
+        return a.get("fout") if a and a.get("version") == version else None
 
     def first_seen(self, entity_id: str, version: str | None) -> datetime:
         """Wanneer zagen we deze versie voor het eerst als beschikbaar (v1.48.0)."""
@@ -428,12 +448,36 @@ def _managed(state, kind: str, options: dict) -> bool:
     return _category(kind) in set(options.get(CONF_CATEGORIES, DEFAULT_CATEGORIES))
 
 
-def plan(hass: HomeAssistant, options: dict) -> tuple[list[dict], list[str]]:
-    """Welke updates staan klaar en in welke volgorde. Geeft (plan, overgeslagen)."""
+def _marketplace_accepted(hass: HomeAssistant) -> bool | None:
+    """v1.55.0: heeft iemand de waarschuwing van de Marktplaats aanvaard? Zonder dat
+    weigert de Marktplaats elke installatie die niet van een gebruiker komt."""
+    try:
+        for entry in hass.config_entries.async_entries("marketplace"):
+            mp = getattr(entry, "runtime_data", None)
+            if mp is not None and hasattr(mp, "warning_acceptances"):
+                return bool(mp.warning_acceptances)
+    except Exception:  # noqa: BLE001
+        pass
+    return None
+
+
+def plan(hass: HomeAssistant, options: dict,
+         details: list[dict] | None = None) -> tuple[list[dict], list[str]]:
+    """Welke updates staan klaar en in welke volgorde. Geeft (plan, overgeslagen).
+    v1.55.0: met details krijg je per overgeslagen update ook een gestructureerde reden."""
     categories = set(options.get(CONF_CATEGORIES, DEFAULT_CATEGORIES))
     reg = er.async_get(hass)
     todo: list[dict] = []
     skipped: list[str] = []
+
+    def _skip(state, name, kind, latest, reason: str, text: str) -> None:
+        skipped.append(text)
+        if details is not None:
+            details.append({
+                "entity_id": state.entity_id, "naam": str(name), "soort": kind,
+                "van": state.attributes.get("installed_version"), "naar": latest,
+                "uitkomst": "overgeslagen", "reden": reason,
+            })
     for state in hass.states.async_all("update"):
         if state.state != "on" or state.attributes.get("in_progress"):
             continue
@@ -444,22 +488,38 @@ def plan(hass: HomeAssistant, options: dict) -> tuple[list[dict], list[str]]:
         name = state.attributes.get("title") or state.attributes.get("friendly_name") or state.entity_id
         latest = state.attributes.get("latest_version")
         if _category(kind) not in categories:
+            if details is not None:
+                details.append({
+                    "entity_id": state.entity_id, "naam": str(name), "soort": kind,
+                    "van": state.attributes.get("installed_version"), "naar": latest,
+                    "uitkomst": "niet_automatisch",
+                    "reden": f"categorie {_category(kind)} staat niet aan",
+                })
             continue
         if kind == "core":
             allowed, why = core_version_allowed(latest)
             if not allowed:
-                skipped.append(f"{name}: {why}")
+                _skip(state, name, kind, latest, why, f"{name}: {why}")
                 continue
+        reg_entry = reg.async_get(state.entity_id)
+        if reg_entry is not None and reg_entry.platform == "marketplace" \
+                and _marketplace_accepted(hass) is False:
+            why = ("de waarschuwing van de Marktplaats is nog niet aanvaard; "
+                   "open de Marktplaats eenmaal als beheerder")
+            _skip(state, name, kind, latest, why, f"{name} {latest}: {why}")
+            continue
         tracker = _tracker(hass)
         if tracker and kind in HOLD_KINDS:
             since = tracker.first_seen(state.entity_id, latest)
             if on_hold(since, dt_util.utcnow()):
                 until = dt_util.as_local(hold_until(since))
-                skipped.append(f"{name} {latest}: nieuwe versie, wacht tot {until:%d/%m} "
-                               f"({HOLD_DAYS} dagen voor bugfixes)")
+                why = f"nieuwe versie, wacht tot {until:%d/%m} ({HOLD_DAYS} dagen voor bugfixes)"
+                _skip(state, name, kind, latest, why, f"{name} {latest}: {why}")
                 continue
         if tracker and tracker.count(state.entity_id, latest) >= MAX_ATTEMPTS:
-            skipped.append(f"{name} {latest}: {MAX_ATTEMPTS} keer mislukt, wacht op manuele actie")
+            fout = tracker.error(state.entity_id, latest)
+            why = f"{MAX_ATTEMPTS} keer mislukt, wacht op manuele actie" + (f" (laatste fout: {fout})" if fout else "")
+            _skip(state, name, kind, latest, why, f"{name} {latest}: {why}")
             continue
         todo.append({
             "entity_id": state.entity_id,
@@ -475,6 +535,10 @@ def plan(hass: HomeAssistant, options: dict) -> tuple[list[dict], list[str]]:
     for u in restarting[1:]:
         todo.remove(u)
         skipped.append(f"{u['name']}: volgende nacht, na de herstart")
+        if details is not None:
+            details.append({"entity_id": u["entity_id"], "naam": u["name"], "soort": u["kind"],
+                            "van": u["from"], "naar": u["to"], "uitkomst": "overgeslagen",
+                            "reden": "volgende nacht, na de herstart van een andere systeemupdate"})
     return todo, skipped
 
 
@@ -569,22 +633,34 @@ async def _async_run_locked(hass: HomeAssistant, options: dict, trigger: str) ->
     result: dict[str, Any] = {
         "started": dt_util.now().isoformat(), "trigger": trigger,
         "installed": [], "failed": [], "skipped": [], "stopped": None,
+        "details": [],  # v1.55.0: per update de uitkomst en de reden
     }
     hass.data[_DATA_LAST] = result
+    details: list[dict] = result["details"]
+
+    def _bewaar() -> None:
+        if (tr := _tracker(hass)) is not None:
+            tr.save_last_run(result)
+
+    def _detail(upd: dict, uitkomst: str, reden: str | None = None) -> None:
+        details.append({"entity_id": upd["entity_id"], "naam": upd["name"], "soort": upd["kind"],
+                        "van": upd["from"], "naar": upd["to"], "uitkomst": uitkomst, "reden": reden})
 
     if _branding_broken(hass):
         result["stopped"] = "zelfcontrole meldt een probleem, geen updates"
         _log(hass, result["stopped"])
+        _bewaar()
         return result
 
     refresh = await async_refresh_hacs_custom(hass)
     if refresh["fouten"]:
         _log(hass, "HACS verversen deels mislukt: " + "; ".join(refresh["fouten"])[:300])
-    todo, skipped = plan(hass, options)
+    todo, skipped = plan(hass, options, details)
     result["skipped"] = skipped
     if not todo:
         if skipped:
             _log(hass, "niets geinstalleerd; overgeslagen: " + "; ".join(skipped))
+        _bewaar()
         return result
 
     use_backup = options.get(CONF_BACKUP, True)
@@ -603,10 +679,13 @@ async def _async_run_locked(hass: HomeAssistant, options: dict, trigger: str) ->
             busy = await async_wait_backup_idle(hass)
             if busy is not None:
                 skipped.append(f"{label}: back-up van HA nog bezig ({busy}), volgende nacht")
+                _detail(upd, "overgeslagen", f"back-up van HA nog bezig ({busy}), volgende nacht")
                 continue
         if upd["kind"] in ("core", "os"):
             # Vanaf hier herstart het systeem; eerst loggen wat al gebeurd is.
             _log(hass, "gestart: " + label + (" (met back-up)" if data.get("backup") else ""))
+            _detail(upd, "gestart", "resultaat na de herstart")
+            _bewaar()
         tracker = _tracker(hass)
         if tracker:
             tracker.add_attempt(upd["entity_id"], upd["to"])
@@ -621,14 +700,19 @@ async def _async_run_locked(hass: HomeAssistant, options: dict, trigger: str) ->
                 system_restarts = True
             if st is None or st.state == "off" or st.attributes.get("installed_version") == upd["to"]:
                 result["installed"].append(label)
+                _detail(upd, "geinstalleerd")
                 if tracker:
                     tracker.reset(upd["entity_id"])
             elif upd["kind"] in ("core", "os", "supervisor"):
                 # Herstart volgt; of het gelukt is, zien we na de herstart.
                 result["installed"].append(label + " (bevestiging na herstart)")
+                _detail(upd, "geinstalleerd", "bevestiging na herstart")
             else:
-                result["failed"].append(f"{label}: na installatie nog altijd {st.attributes.get('installed_version')}")
+                why = f"na installatie nog altijd {st.attributes.get('installed_version')}"
+                result["failed"].append(f"{label}: {why}")
+                _detail(upd, "mislukt", why)
                 if tracker:
+                    tracker.set_error(upd["entity_id"], why)
                     tracker.mark_done(upd["entity_id"])
             if upd["kind"] == "hacs":
                 hacs_done = True
@@ -643,11 +727,15 @@ async def _async_run_locked(hass: HomeAssistant, options: dict, trigger: str) ->
                 system_restarts = True
                 skipped.append(f"{label}: na {_INSTALL_TIMEOUT // 60} minuten nog niet klaar, "
                                "resultaat volgt na de herstart")
+                _detail(upd, "bezig", f"na {_INSTALL_TIMEOUT // 60} minuten nog niet klaar, resultaat na de herstart")
                 _LOGGER.info("BT auto-update: %s duurt lang, resultaat na herstart", label)
                 continue
             installing.pop(upd["entity_id"], None)
-            result["failed"].append(f"{label}: duurde langer dan {_INSTALL_TIMEOUT // 60} minuten")
+            why = f"duurde langer dan {_INSTALL_TIMEOUT // 60} minuten"
+            result["failed"].append(f"{label}: {why}")
+            _detail(upd, "mislukt", why)
             if tracker:
+                tracker.set_error(upd["entity_id"], why)
                 tracker.mark_done(upd["entity_id"])
             _LOGGER.info("BT auto-update: %s duurde te lang", label)
         except Exception as err:  # noqa: BLE001
@@ -657,10 +745,14 @@ async def _async_run_locked(hass: HomeAssistant, options: dict, trigger: str) ->
                 if tracker:
                     tracker.undo_attempt(upd["entity_id"], upd["to"])
                 skipped.append(f"{label}: back-up van HA bezig, volgende nacht")
+                _detail(upd, "overgeslagen", "back-up van HA bezig, volgende nacht")
                 _LOGGER.info("BT auto-update: %s uitgesteld: %s", label, err)
                 continue
-            result["failed"].append(f"{label}: {err or type(err).__name__}")
+            why = str(err) or type(err).__name__
+            result["failed"].append(f"{label}: {why}")
+            _detail(upd, "mislukt", why)
             if tracker:
+                tracker.set_error(upd["entity_id"], why)
                 tracker.mark_done(upd["entity_id"])
             _LOGGER.info("BT auto-update: %s mislukt: %s", label, err)
         else:
@@ -670,6 +762,7 @@ async def _async_run_locked(hass: HomeAssistant, options: dict, trigger: str) ->
                 # zou falen en als mislukte poging tellen. De rest volgt de volgende nacht.
                 for rest in todo[index + 1:]:
                     skipped.append(f"{rest['name']}: volgende nacht, Supervisor herstart")
+                    _detail(rest, "overgeslagen", "volgende nacht, de Supervisor herstart")
                 break
 
     # v1.33.1: met de opties van nu (ze kunnen tijdens de run gewijzigd zijn)
@@ -683,6 +776,7 @@ async def _async_run_locked(hass: HomeAssistant, options: dict, trigger: str) ->
     if skipped:
         summary.append("overgeslagen: " + "; ".join(skipped))
     _log(hass, " | ".join(summary))
+    _bewaar()
 
     async_dispatcher_send(hass, f"{DOMAIN}_status_changed", "updates")
 
@@ -794,6 +888,8 @@ async def async_setup_visibility(hass: HomeAssistant, get_options) -> None:
         tracker = Tracker(hass)
         await tracker.async_load()
         hass.data[_DATA_TRACKER] = tracker
+        if tracker.last_run and not hass.data.get(_DATA_LAST):
+            hass.data[_DATA_LAST] = tracker.last_run  # v1.55.0
     if unsub := hass.data.pop(_DATA_VIS_UNSUB, None):
         unsub()
     hass.data[_DATA_GETOPTS] = get_options
