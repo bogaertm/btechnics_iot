@@ -36,7 +36,7 @@
 const BRAND = "Btechnics IOT";
 // v1.51.0: bovenaan, want BT gebruikt de versie in de adressen. Iconen en logo staan
 // 31 dagen in de cache (cache_headers van HA); een nieuwe versie geeft een nieuw adres.
-const BT_VERSION = "1.55.0";
+const BT_VERSION = "1.55.1";
 
 const BT = {
   logo: "/btechnics_branding/logo.svg?v=" + BT_VERSION,
@@ -281,9 +281,16 @@ function patchSidebar() {
     logo = document.createElement("img");
     logo.className = "bt-sidebar-logo";
     logo.alt = "";
+    // v1.55.1: na een update zonder herstart draait nog de oude backend, die logo-zijbalk.svg
+    // nog niet kent; dan het gewone logo tonen in plaats van niets
+    logo.addEventListener("error", () => {
+      if (logo.dataset.btFout) return;
+      logo.dataset.btFout = "1";
+      logo.src = BT.logo;
+    });
   }
   // v1.53.0: petrol zijbalkkop met het logo met baseline (witte tekst)
-  if (logo.getAttribute("src") !== BT.logoSidebar) logo.src = BT.logoSidebar;
+  if (!logo.dataset.btFout && logo.getAttribute("src") !== BT.logoSidebar) logo.src = BT.logoSidebar;
   logo.style.cssText = "height:" + LOGO_H + "px;width:auto;max-width:" + (BT.customerLogo ? "60%" : "100%") + ";object-fit:contain;" +
     "object-position:left center;display:block;flex-shrink:1;min-width:0;";
   if (logo.parentNode !== rij) rij.appendChild(logo);
@@ -317,6 +324,26 @@ function patchSidebar() {
       "ha-list-item-button.selected{box-shadow:inset 4px 0 0 #ED6928}" +
       "ha-list-item-button.selected::before{background-color:#04212B!important;opacity:.08!important}";
     sr.appendChild(st);
+  }
+  // v1.55.1: HA 2026.11 zet de rand van de zijbalk op .sidebar-shell in ha-drawer; over de petrol
+  // kop gaf dat een lichte streep. Die rand weg, de lijn staat nu op ha-sidebar zelf.
+  const drawerSR = mainSR.querySelector("ha-drawer")?.shadowRoot;
+  if (drawerSR && drawerSR.querySelector(".sidebar-shell")) {
+    if (!drawerSR.querySelector("style.bt-drawer-style")) {
+      const ds = document.createElement("style");
+      ds.className = "bt-drawer-style";
+      ds.textContent = ".sidebar-shell{border-inline-end:0!important}";
+      drawerSR.appendChild(ds);
+    }
+    // aparte bewaking: een nieuwe ha-sidebar (eigen shadow root) krijgt de lijn opnieuw
+    if (!sr.querySelector("style.bt-sb-lijn")) {
+      const hs = document.createElement("style");
+      hs.className = "bt-sb-lijn";
+      // de lijn tekenen we nu op ha-sidebar zelf: de petrol kop ligt erover, de lijst niet
+      hs.textContent = ":host{box-shadow:inset -1px 0 0 var(--divider-color,#0000001f)!important}" +
+        ":host(:dir(rtl)){box-shadow:inset 1px 0 0 var(--divider-color,#0000001f)!important}";
+      sr.appendChild(hs);
+    }
   }
 
   // De tekst onder het logo enkel als de klant een eigen tekst instelde; het logo zegt al Btechnics.
