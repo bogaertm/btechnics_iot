@@ -36,7 +36,7 @@
 const BRAND = "Btechnics IOT";
 // v1.51.0: bovenaan, want BT gebruikt de versie in de adressen. Iconen en logo staan
 // 31 dagen in de cache (cache_headers van HA); een nieuwe versie geeft een nieuw adres.
-const BT_VERSION = "1.55.1";
+const BT_VERSION = "1.56.0";
 
 const BT = {
   logo: "/btechnics_branding/logo.svg?v=" + BT_VERSION,
@@ -257,30 +257,18 @@ function patchSidebar() {
   for (const node of [...title.childNodes])
     if (node.nodeType === Node.TEXT_NODE) node.remove();
 
-  // v1.28.2: de zijbalkkop is twee rijen. Rij 1 is een vaste logoregel (LOGO_H px hoog) met het
-  // Btechnics logo en, als het er is, het klantenlogo ernaast. Beide worden op die hoogte
-  // geschaald, breedte automatisch, met een maximale breedte zodat een breed klantenlogo de
-  // regel nooit breekt. Rij 2 is de tekst, op een regel met afkapping. Zo kan geen enkel logo
-  // de tekst uit de kop duwen, wat er sinds v1.28.2 gebeurde (.title is geen flex container).
-  const LOGO_H = 34;  // v1.53.0: logo met baseline, iets hoger voor de leesbaarheid
-  title.style.cssText = "display:flex;flex-direction:column;justify-content:center;gap:3px;" +
-    "overflow:hidden;line-height:1.2;padding-left:8px;padding-right:12px;box-sizing:border-box;" +
-    "flex:1 1 auto;min-width:0;";  // v1.53.0: nooit breder dan de kop, anders werd het logo afgesneden
-
-  let rij = sr.querySelector(".bt-logos");
-  if (!rij) {
-    rij = document.createElement("div");
-    rij.className = "bt-logos";
-    title.insertBefore(rij, title.firstChild);
-  }
-  rij.style.cssText = "display:flex;align-items:center;gap:10px;height:" + LOGO_H + "px;" +
-    "max-width:100%;min-width:0;overflow:hidden;flex-shrink:0;";
+  // v1.56.0 (Voorstel C, keuze Matthias 22/11): de petrol kop is enkel van Btechnics, even hoog
+  // als de bovenbalk, met het logo zonder baseline (de baseline is pas leesbaar vanaf 140px
+  // breed). Klantlogo en klantnaam staan in een eigen witte band onder de kop (zie verder).
+  const LOGO_H = 24;
+  title.style.cssText = "display:flex;align-items:center;overflow:hidden;padding-left:8px;" +
+    "padding-right:12px;box-sizing:border-box;flex:1 1 auto;min-width:0;";
 
   let logo = sr.querySelector(".bt-sidebar-logo");
   if (!logo) {
     logo = document.createElement("img");
     logo.className = "bt-sidebar-logo";
-    logo.alt = "";
+    logo.alt = "Btechnics";
     // v1.55.1: na een update zonder herstart draait nog de oude backend, die logo-zijbalk.svg
     // nog niet kent; dan het gewone logo tonen in plaats van niets
     logo.addEventListener("error", () => {
@@ -289,30 +277,13 @@ function patchSidebar() {
       logo.src = BT.logo;
     });
   }
-  // v1.53.0: petrol zijbalkkop met het logo met baseline (witte tekst)
   if (!logo.dataset.btFout && logo.getAttribute("src") !== BT.logoSidebar) logo.src = BT.logoSidebar;
-  logo.style.cssText = "height:" + LOGO_H + "px;width:auto;max-width:" + (BT.customerLogo ? "60%" : "100%") + ";object-fit:contain;" +
+  logo.style.cssText = "height:" + LOGO_H + "px;width:auto;max-width:100%;object-fit:contain;" +
     "object-position:left center;display:block;flex-shrink:1;min-width:0;";
-  if (logo.parentNode !== rij) rij.appendChild(logo);
-
-  let klant = sr.querySelector(".bt-sidebar-customer-logo");
-  if (BT.customerLogo) {
-    if (!klant) {
-      klant = document.createElement("img");
-      klant.className = "bt-sidebar-customer-logo";
-      klant.alt = "";
-    }
-    // Schaal enkel naar beneden in de zijbalk: hoger dan de logoregel kan nooit.
-    const h = Math.round(LOGO_H * Math.min(BT.customerScale, 100) / 100);
-    // Witte pil: klantlogo's zijn meestal voor een lichte achtergrond gemaakt en vallen weg op petrol.
-    klant.style.cssText = "height:" + h + "px;width:auto;max-width:40%;object-fit:contain;" +
-      "object-position:left center;display:block;flex-shrink:1;min-width:0;" +
-      "background:#ffffff;border-radius:6px;padding:3px 6px;box-sizing:content-box;";
-    if (klant.getAttribute("src") !== BT.customerLogo) klant.src = BT.customerLogo;
-    if (klant.parentNode !== rij) rij.appendChild(klant);
-  } else if (klant) {
-    klant.remove();
-  }
+  if (logo.parentNode !== title) title.insertBefore(logo, title.firstChild);
+  // oude onderdelen van voor v1.56.0 opruimen
+  for (const oud of sr.querySelectorAll(".bt-logos, .menu .bt-sidebar-text, .menu .bt-sidebar-customer-logo"))
+    if (!oud.contains(logo)) oud.remove();
 
   // v1.53.0: kleuren van de kop en de selectie (Variant B, keuze Matthias 13/11)
   if (!sr.querySelector("style.bt-sb-style")) {
@@ -346,21 +317,46 @@ function patchSidebar() {
     }
   }
 
-  // De tekst onder het logo enkel als de klant een eigen tekst instelde; het logo zegt al Btechnics.
+  // v1.56.0: witte band onder de kop met het klantlogo op zijn eigen witte grond en de naam.
+  // Enkel als de klant een logo of een eigen tekst heeft, en enkel in de uitgeklapte zijbalk.
   const toonTekst = BT.sidebarText && BT.sidebarText !== BRAND;
-  let span = sr.querySelector(".bt-sidebar-text");
-  if (!span) {
-    span = document.createElement("span");
-    span.className = "bt-sidebar-text";
+  const menu = sr.querySelector(".menu");
+  let band = sr.querySelector(".bt-klantband");
+  if (menu && (toonTekst || BT.customerLogo)) {
+    if (!band) {
+      band = document.createElement("div");
+      band.className = "bt-klantband";
+      band.innerHTML = '<img class="bt-sidebar-customer-logo" alt=""><span class="bt-sidebar-text"></span>';
+    }
+    if (band.previousElementSibling !== menu) menu.insertAdjacentElement("afterend", band);
+    const img = band.querySelector("img");
+    const txt = band.querySelector("span");
+    if (BT.customerLogo) {
+      const h = Math.round(32 * Math.min(BT.customerScale, 100) / 100);
+      img.style.cssText = "height:" + h + "px;width:auto;max-width:" + (toonTekst ? "45%" : "100%") +
+        ";object-fit:contain;object-position:left center;display:block;flex-shrink:0;";
+      if (img.getAttribute("src") !== BT.customerLogo) img.src = BT.customerLogo;
+    } else {
+      img.style.display = "none";
+    }
+    // Enkel schrijven als het verschilt (anders eindeloze patchrondes, zie v1.28)
+    const tekst = toonTekst ? BT.sidebarText : "";
+    if (txt.textContent !== tekst) txt.textContent = tekst;
+    txt.style.cssText = "font-size:" + Math.min(BT.sidebarSize, 18) + "px;font-weight:700;color:#04212B;" +
+      "white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;" + (toonTekst ? "" : "display:none;");
+  } else if (band) {
+    band.remove();
   }
-  // Enkel schrijven als het verschilt: textContent zetten vervangt de tekstnode, dat is
-  // een mutatie, en die startte een nieuwe patchronde (eindeloze lus, ~13 per seconde).
-  if (span.textContent !== BT.sidebarText) span.textContent = BT.sidebarText;
-  span.style.cssText = "display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" +
-    "font-size:" + BT.sidebarSize + "px;";
-  span.style.color = "#fff";
-  if (toonTekst) { if (span.parentNode !== title) title.appendChild(span); }
-  else if (span.parentNode) span.remove();
+  if (!sr.querySelector("style.bt-band-style")) {
+    const bs = document.createElement("style");
+    bs.className = "bt-band-style";
+    bs.textContent =
+      ".bt-klantband{display:flex;align-items:center;gap:10px;height:52px;padding:0 16px;" +
+      "box-sizing:border-box;background:#fff;border-bottom:1px solid var(--divider-color,#0000001f);" +
+      "overflow:hidden;flex-shrink:0}" +
+      ":host(:not([expanded])) .bt-klantband{display:none}";
+    sr.appendChild(bs);
+  }
 }
 
 // mdiHomeAssistant pad begint zo (src/resources/home-assistant-logo-svg.ts)

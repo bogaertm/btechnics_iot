@@ -8,11 +8,11 @@ Instellingen > Apparaten en diensten > Btechnics IOT > Configureren:
 
 | Optie | Standaard |
 |---|---|
-| Tekst aanmeldscherm en zijbalk | Btechnics IOT |
+| Tekst aanmeldscherm en zijbalk (een eigen tekst komt in de witte band onder de kop) | Btechnics IOT |
 | Zoom desktop (%) | 80 |
 | Zoom mobiel (%) | 85 |
 | Grens mobiel/desktop (px) | 870 |
-| Klantenlogo (upload, naast het Btechnics logo in zijbalk, aanmeld- en opstartscherm) | geen |
+| Klantenlogo (upload; in de zijbalk in een witte band onder de petrol kop, ook op het aanmeld- en opstartscherm) | geen |
 | Grootte klantenlogo (% van het Btechnics logo) | 100 |
 
 ## Installatie
